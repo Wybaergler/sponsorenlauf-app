@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
 
 class RegisterPage extends StatefulWidget {
+  // NEU: Definiert den "Straßennamen" für diese Seite
+  static const routeName = '/register';
+
   final VoidCallback showLoginPage;
   const RegisterPage({super.key, required this.showLoginPage});
 
@@ -17,55 +20,37 @@ class _RegisterPageState extends State<RegisterPage> {
   final _confirmPasswordController = TextEditingController();
 
   Future<void> _signUp() async {
-    showDialog(context: context, builder: (context) => const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+    final dialogContext = context;
+    showDialog(context: dialogContext, builder: (context) => const Center(child: CircularProgressIndicator()), barrierDismissible: false);
 
     if (_passwordController.text != _confirmPasswordController.text) {
-      Navigator.pop(context);
+      Navigator.pop(dialogContext);
       _showErrorDialog("Die Passwörter stimmen nicht überein.");
       return;
     }
 
     try {
-      // Schritt 1: Benutzer in Firebase Authentication erstellen
-      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      // Schritt 2: Dokument für den neuen Benutzer in der "Laufer"-Sammlung erstellen
-      await FirebaseFirestore.instance.collection("Laufer").doc(userCredential.user!.uid).set({
-        'uid': userCredential.user!.uid,
-        'email': _emailController.text.trim(),
-        'name': '', // Name ist anfangs leer, muss im Profil ausgefüllt werden
-        'teamName': '',
-        'motivation': '',
-        'profileImageUrl': '',
-        'isPublic': true,
-      });
-
-      // --- NEU: Schritt 3: Die Willkommens-E-Mail auslösen ---
+      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: _emailController.text.trim(), password: _passwordController.text.trim());
+      await FirebaseFirestore.instance.collection("Laufer").doc(userCredential.user!.uid).set({'uid': userCredential.user!.uid, 'email': _emailController.text.trim(), 'name': '', 'teamName': '', 'motivation': '', 'profileImageUrl': '', 'isPublic': true, 'role': 'user'});
       final projectId = FirebaseFirestore.instance.app.options.projectId;
       await FirebaseFirestore.instance.collection("mail").add({
         'to': [_emailController.text.trim()],
         'message': {
           'subject': 'Willkommen beim EVP Sponsorenlauf!',
-          'html': '''
-            <p>Hallo!</p>
-            <p>Vielen Dank für deine Registrierung beim Sponsorenlauf der EVP.</p>
-            <p>Dein persönliches Profil ist jetzt aktiv. Beginne gleich damit, Sponsoren zu finden, indem du diesen Link teilst. Du findest ihn auch jederzeit in deinem Profil.</p>
-            <p><b>Dein persönlicher Sponsoring-Link:</b></p>
-            <p><a href="https://<deine-domain>.ch/sponsor/${userCredential.user!.uid}">https://<deine-domain>.ch/sponsor/${userCredential.user!.uid}</a></p>
-            <p>Wir wünschen dir viel Erfolg bei der Vorbereitung!</p>
-            <p>Dein Sponsorenlauf-Team</p>
-          ''',
+          'html': '<p>Hallo!</p><p>Dein persönlicher Sponsoring-Link:</p><p><a href="https://<deine-domain>.ch/sponsor/${userCredential.user!.uid}">https://<deine-domain>.ch/sponsor/${userCredential.user!.uid}</a></p><p>Dein Sponsorenlauf-Team</p>',
         },
       });
 
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(dialogContext); // Ladekreis entfernen
+        // Die Navigation wird jetzt vom AuthGate übernommen.
+      }
 
     } on FirebaseAuthException catch (e) {
-      if (mounted) Navigator.pop(context);
-      _showErrorDialog(e.message ?? "Ein unbekannter Fehler ist aufgetreten.");
+      if (mounted) {
+        Navigator.pop(dialogContext);
+        _showErrorDialog(e.message ?? "Ein unbekannter Fehler ist aufgetreten.");
+      }
     }
   }
 
@@ -95,62 +80,28 @@ class _RegisterPageState extends State<RegisterPage> {
               children: [
                 Image.asset('assets/images/logo.png', height: 150),
                 const SizedBox(height: 50),
-                const Text(
-                  'Als Läufer neu registrieren',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)
-                ),
+                const Text('Als Läufer neu registrieren', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(hintText: 'E-Mail', prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true),
-                ),
+                TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: InputDecoration(hintText: 'E-Mail', prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: InputDecoration(hintText: 'Passwort', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true),
-                ),
+                TextField(controller: _passwordController, obscureText: true, decoration: InputDecoration(hintText: 'Passwort', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: _confirmPasswordController,
-                  obscureText: true,
-                  decoration: InputDecoration(hintText: 'Passwort bestätigen', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true),
-                ),
+                TextField(controller: _confirmPasswordController, obscureText: true, decoration: InputDecoration(hintText: 'Passwort bestätigen', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _signUp,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.secondary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.all(20),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
-                    ),
-                    child: const Text('Registrieren', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  ),
-                ),
+                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _signUp, style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.secondary, foregroundColor: Colors.white, padding: const EdgeInsets.all(20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Registrieren', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
                 const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text('Bereits ein Konto?', style: TextStyle(color: Colors.grey[700])),
-                    TextButton(
-                      onPressed: widget.showLoginPage,
-                      child: Text('Hier einloggen', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold)),
-                    ),
+                    TextButton(onPressed: widget.showLoginPage, child: Text('Hier einloggen', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold))),
                   ],
                 ),
                 const SizedBox(height: 20),
                 TextButton.icon(
                   onPressed: () {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (context) => const PublicLandingPage()),
-                      (Route<dynamic> route) => false,
-                    );
+                    // GEÄNDERT: Saubere Navigation zur Startseite
+                    Navigator.popAndPushNamed(context, PublicLandingPage.routeName);
                   },
                   icon: const Icon(Icons.arrow_back),
                   label: const Text("Zurück zum Sponsorenlauf"),

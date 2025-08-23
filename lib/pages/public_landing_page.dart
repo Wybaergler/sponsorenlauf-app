@@ -3,10 +3,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/auth/auth_gate.dart';
 import 'package:sponsorenlauf_app/components/runner_tile.dart';
+import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
 import 'package:sponsorenlauf_app/pages/leaderboard_page.dart';
 import 'package:sponsorenlauf_app/pages/profile_page.dart';
+import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 
 class PublicLandingPage extends StatefulWidget {
+  // NEU: Definiert den "Straßennamen" für diese Seite
+  static const routeName = '/';
+
   const PublicLandingPage({super.key});
 
   @override
@@ -14,14 +19,12 @@ class PublicLandingPage extends StatefulWidget {
 }
 
 class _PublicLandingPageState extends State<PublicLandingPage> {
-  // Wir nutzen den Auth-Stream, um auf Login-Änderungen zu reagieren
   final FirebaseAuth _auth = FirebaseAuth.instance;
   User? _currentUser;
 
   @override
   void initState() {
     super.initState();
-    // Hörer einrichten, der uns über Login-Status-Änderungen informiert
     _auth.authStateChanges().listen((User? user) {
       if (mounted) {
         setState(() {
@@ -43,9 +46,6 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // ================================================================
-            // NEUER KONDITIONALER LOGIN-STATUS-BALKEN
-            // ================================================================
             if (isLoggedIn)
               Container(
                 width: double.infinity,
@@ -57,8 +57,6 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                   style: const TextStyle(color: Colors.white),
                 ),
               ),
-              
-            // --- Header (unverändert) ---
             Container(
               padding: const EdgeInsets.symmetric(vertical: 40.0, horizontal: 24.0),
               child: Center(
@@ -82,36 +80,33 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 20),
-                  
-                  // ================================================================
-                  // NEUER KONDITIONALER BUTTON
-                  // ================================================================
                   Center(
                     child: isLoggedIn
-                        ? ElevatedButton.icon( // Wenn eingeloggt: "Zu meinem Konto"
-                            onPressed: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilePage()));
-                            },
-                            style: ElevatedButton.styleFrom(
-                              minimumSize: const Size(0, 50),
-                              padding: const EdgeInsets.symmetric(horizontal: 24),
-                            ),
-                            icon: const Icon(Icons.person),
-                            label: const Text("Zu meinem Konto"),
-                          )
-                        : ElevatedButton.icon( // Wenn ausgeloggt: "Registrieren / Anmelden"
-                            onPressed: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (context) => const AuthGate()));
-                            },
-                            style: ElevatedButton.styleFrom(
-                              minimumSize: const Size(0, 50),
-                              padding: const EdgeInsets.symmetric(horizontal: 24),
-                            ),
-                            icon: const Icon(Icons.directions_run),
-                            label: const Text("Registrieren / Anmelden für Läufer"),
-                          ),
+                        ? ElevatedButton.icon(
+                      onPressed: () {
+                        // GEÄNDERT: Navigation über Routenname
+                        Navigator.pushNamed(context, ProfilePage.routeName);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(0, 50),
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                      ),
+                      icon: const Icon(Icons.person),
+                      label: const Text("Zu meinem Konto"),
+                    )
+                        : ElevatedButton.icon(
+                      onPressed: () {
+                        // GEÄNDERT: Navigation über Routenname
+                        Navigator.pushNamed(context, AuthGate.routeName);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(0, 50),
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                      ),
+                      icon: const Icon(Icons.directions_run),
+                      label: const Text("Registrieren / Anmelden für Läufer"),
+                    ),
                   ),
-
                   const SizedBox(height: 10),
                   Center(
                     child: ElevatedButton.icon(
@@ -131,7 +126,6 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                     ),
                   ),
                   const SizedBox(height: 20),
-
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance.collection("Laufer").where('isPublic', isEqualTo: true).snapshots(),
                     builder: (context, snapshot) {
@@ -157,7 +151,7 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                         itemBuilder: (context, index) {
                           final userDocument = users[index];
                           final userData = userDocument.data() as Map<String, dynamic>;
-                          
+
                           final name = userData['name'] ?? userData['email'];
                           final imageUrl = userData['profileImageUrl'] ?? '';
                           final runnerId = userDocument.id;

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:sponsorenlauf_app/auth/auth_gate.dart';
+import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
+import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart'; // KORRIGIERTER PFAD
 import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
 import 'package:sponsorenlauf_app/pages/profile_page.dart';
 import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
-import 'package:sponsorenlauf_app/pages/sponsoring_page.dart'; // Wichtiger Import für die Route
+import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 import 'package:sponsorenlauf_app/theme/app_theme.dart';
 import 'firebase_options.dart';
 
@@ -25,33 +27,29 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Sponsorenlauf App',
       theme: AppTheme.theme,
-      
-      // ANPASSUNG: Wir definieren die "Straßenkarte" unserer App
-      initialRoute: '/', // Die Startseite ist die Wurzel ('/')
+
+      initialRoute: PublicLandingPage.routeName,
       routes: {
-        '/': (context) => const PublicLandingPage(),
-        '/auth': (context) => const AuthGate(),
-        '/profile': (context) => const ProfilePage(),
-        '/edit_profile': (context) => const EditProfilePage(),
+        PublicLandingPage.routeName: (context) => const PublicLandingPage(),
+        AuthGate.routeName: (context) => const AuthGate(),
+        ProfilePage.routeName: (context) => const ProfilePage(),
+        EditProfilePage.routeName: (context) => const EditProfilePage(),
+        AdminDashboardPage.routeName: (context) => const AdminDashboardPage(),
       },
 
-      // Diese spezielle Funktion wird aufgerufen, wenn ein Link nicht exakt
-      // auf eine der oben genannten Routen passt.
       onGenerateRoute: (settings) {
-        // Wir prüfen, ob der Link mit unserem Sponsoring-Pattern übereinstimmt.
-        if (settings.name != null && settings.name!.startsWith('/sponsorship/')) {
-          // Wir extrahieren die ID aus dem Link (der Teil nach dem letzten '/')
-          final sponsorshipId = settings.name!.split('/').last;
-
-          // Wir erstellen die Sponsoring-Seite im Bearbeitungsmodus.
-          // WICHTIG: Die runnerId ist im Link nicht enthalten, daher müssen wir sie
-          // innerhalb der SponsoringPage aus der Datenbank nachladen.
+        if (settings.name == SponsoringPage.routeName) {
+          final args = settings.arguments as SponsoringPageArguments;
           return MaterialPageRoute(
-            builder: (context) => SponsoringPage(sponsorshipId: sponsorshipId, runnerId: ''),
+            builder: (context) {
+              return SponsoringPage(
+                runnerId: args.runnerId,
+                sponsorshipId: args.sponsorshipId,
+              );
+            },
           );
         }
-        
-        // Wenn die URL unbekannt ist, machen wir nichts.
+        assert(false, 'Need to implement ${settings.name}');
         return null;
       },
     );

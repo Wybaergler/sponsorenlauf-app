@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 enum SponsoringType { perLap, fixed }
 
 class SponsoringPage extends StatefulWidget {
+  // NEU: Definiert den "Straßennamen" für diese Seite
+  static const routeName = '/sponsorship';
+
   final String runnerId;
   final String? sponsorshipId;
 
@@ -23,11 +26,11 @@ class _SponsoringPageState extends State<SponsoringPage> {
   late final Future<DocumentSnapshot> _runnerFuture;
   final _formKey = GlobalKey<FormState>();
   SponsoringType _sponsoringType = SponsoringType.perLap;
-  
+
   final _sponsorNameController = TextEditingController();
   final _sponsorEmailController = TextEditingController();
   final _amountController = TextEditingController();
-  
+
   bool get _isEditMode => widget.sponsorshipId != null;
   bool get _isOpenedByRunner => FirebaseAuth.instance.currentUser != null;
 
@@ -65,7 +68,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
     _amountController.dispose();
     super.dispose();
   }
-  
+
   Future<Map<String, String>> _getRunnerData() async {
     try {
       final runnerDoc = await FirebaseFirestore.instance.collection('Laufer').doc(widget.runnerId).get();
@@ -96,7 +99,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
         'sponsoringType': _sponsoringType.name,
         'addedByRunner': !_isEditMode && _isOpenedByRunner,
       };
-      
+
       String sponsorshipDocId;
 
       if (_isEditMode) {
@@ -113,43 +116,25 @@ class _SponsoringPageState extends State<SponsoringPage> {
         final runnerName = runnerData['name']!;
         final runnerEmail = runnerData['email']!;
         final projectId = FirebaseFirestore.instance.app.options.projectId;
-
-        // --- HIER IST DIE ANPASSUNG ---
         String zusageText;
         if (_sponsoringType == SponsoringType.fixed) {
           zusageText = "einen Fixbetrag von <b>CHF ${amount.toStringAsFixed(2)}</b>";
         } else {
           zusageText = "einen Betrag von <b>CHF ${amount.toStringAsFixed(2)} pro Runde</b>";
         }
-
-        // E-Mail 1: Dankes-E-Mail an den Sponsor
         await FirebaseFirestore.instance.collection('mail').add({
           'to': [_sponsorEmailController.text.trim()],
           'message': {
             'subject': 'Vielen Dank für Ihre Unterstützung!',
-            'html': '''
-              <p>Hallo ${_sponsorNameController.text.trim()},</p>
-              <p>vielen Dank für Ihre Zusage, <b>$runnerName</b> beim Sponsorenlauf der EVP mit $zusageText zu unterstützen.</p>
-              <p>Ihre Zusage wurde erfolgreich erfasst. Der Läufer $runnerName wurde ebenfalls direkt per E-Mail informiert. Nach dem Lauf werden wir Sie über den finalen Spendenbetrag informieren.</p>
-              <p>Sollten Sie Ihre Zusage bearbeiten wollen, können Sie dies über den folgenden Link tun:</p>
-              <p><a href="https://$projectId.web.app/sponsorship/$sponsorshipDocId">Ihre Zusage bearbeiten</a></p>
-              <p>Mit freundlichen Grüssen,<br>Ihr Sponsorenlauf-Team</p>
-            ''',
+            'html': '<p>Hallo ${_sponsorNameController.text.trim()},</p><p>vielen Dank für Ihre Zusage, <b>$runnerName</b> beim Sponsorenlauf der EVP mit $zusageText zu unterstützen.</p><p>Ihre Zusage wurde erfolgreich erfasst. Der Läufer $runnerName wurde ebenfalls direkt per E-Mail informiert. Nach dem Lauf werden wir Sie über den finalen Spendenbetrag informieren.</p><p>Sollten Sie Ihre Zusage bearbeiten wollen, können Sie dies über den folgenden Link tun:</p><p><a href="https://$projectId.web.app/sponsorship/$sponsorshipDocId">Ihre Zusage bearbeiten</a></p><p>Mit freundlichen Grüssen,<br>Ihr Sponsorenlauf-Team</p>',
           },
         });
-
-        // E-Mail 2: Benachrichtigung an den Läufer
         if (runnerEmail.isNotEmpty) {
-           await FirebaseFirestore.instance.collection('mail').add({
+          await FirebaseFirestore.instance.collection('mail').add({
             'to': [runnerEmail],
             'message': {
               'subject': 'Neue Unterstützung für Ihren Sponsorenlauf!',
-              'html': '''
-                <p>Hallo $runnerName,</p>
-                <p>Gute Nachrichten! <b>${_sponsorNameController.text.trim()}</b> hat soeben eine neue Spendenzusage für Sie gemacht: $zusageText.</p>
-                <p>Sie können alle Ihre Sponsoren in Ihrem Dashboard in der App einsehen.</p>
-                <p>Weiterhin viel Erfolg beim Sammeln!</p>
-              ''',
+              'html': '<p>Hallo $runnerName,</p><p>Gute Nachrichten! <b>${_sponsorNameController.text.trim()}</b> hat soeben eine neue Spendenzusage für Sie gemacht: $zusageText.</p><p>Sie können alle Ihre Sponsoren in Ihrem Dashboard in der App einsehen.</p><p>Weiterhin viel Erfolg beim Sammeln!</p>',
             },
           });
         }
@@ -174,7 +159,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
       builder: (context) => AlertDialog(
         title: const Text("Vielen Dank!"),
         content: Text(
-          _isEditMode 
+          _isEditMode
               ? "Die Zusage wurde erfolgreich aktualisiert."
               : "Ihre Zusage wurde erfolgreich gespeichert. Falls Sie eine E-Mail angegeben haben, erhalten Sie in Kürze eine Bestätigung.",
         ),
@@ -275,7 +260,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
                           ),
                           const SizedBox(height: 16),
                           SizedBox(
-                            width: 200, 
+                            width: 200,
                             child: TextFormField(
                               controller: _amountController,
                               textAlign: TextAlign.center,
@@ -313,7 +298,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
                         keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
                           labelText: "E-Mail des Sponsors *",
-                          helperText: _isOpenedByRunner 
+                          helperText: _isOpenedByRunner
                               ? "Falls keine E-Mail vorhanden, gib deine eigene ein."
                               : "Wird für die Bestätigung und Abrechnung verwendet.",
                         ),

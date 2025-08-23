@@ -1,8 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:sponsorenlauf_app/pages/public_landing_page.dart'; // WICHTIGER NEUER IMPORT
+import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
 
 class LoginPage extends StatefulWidget {
+  // NEU: Definiert den "Straßennamen" für diese Seite
+  static const routeName = '/login';
+
   final VoidCallback showRegisterPage;
   const LoginPage({super.key, required this.showRegisterPage});
 
@@ -21,6 +24,7 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+      // Die Navigation wird jetzt vom AuthGate übernommen. Wir schließen nur noch den Ladekreis.
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       if (mounted) Navigator.pop(context);
@@ -53,57 +57,26 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 Image.asset('assets/images/logo.png', height: 150),
                 const SizedBox(height: 50),
-                const Text(
-                  'Als Läufer anmelden',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
+                const Text('Als Läufer anmelden', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(hintText: 'E-Mail', prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true),
-                ),
+                TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: InputDecoration(hintText: 'E-Mail', prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: InputDecoration(hintText: 'Passwort', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true),
-                ),
+                TextField(controller: _passwordController, obscureText: true, decoration: InputDecoration(hintText: 'Passwort', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _signIn,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.secondary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.all(20),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
-                    ),
-                    child: const Text('Einloggen', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  ),
-                ),
+                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _signIn, style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.secondary, foregroundColor: Colors.white, padding: const EdgeInsets.all(20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Einloggen', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
                 const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text('Noch kein Konto?', style: TextStyle(color: Colors.grey[700])),
-                    TextButton(
-                      onPressed: widget.showRegisterPage,
-                      child: Text('Hier registrieren', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold)),
-                    ),
+                    TextButton(onPressed: widget.showRegisterPage, child: Text('Hier registrieren', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold))),
                   ],
                 ),
                 const SizedBox(height: 20),
                 TextButton.icon(
-                  // --- HIER IST DIE ANGEPASSTE LOGIK ---
                   onPressed: () {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (context) => const PublicLandingPage()),
-                      (Route<dynamic> route) => false,
-                    );
+                    // GEÄNDERT: Saubere Navigation zur Startseite
+                    Navigator.popAndPushNamed(context, PublicLandingPage.routeName);
                   },
                   icon: const Icon(Icons.arrow_back),
                   label: const Text("Zurück zum Sponsorenlauf"),

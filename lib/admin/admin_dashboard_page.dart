@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:sponsorenlauf_app/admin/counting_station_page.dart';
 
 class AdminDashboardPage extends StatefulWidget {
+  // --- HIER IST DIE KORREKTE POSITION ---
+  static const routeName = '/admin_dashboard';
+
   const AdminDashboardPage({super.key});
 
   @override
@@ -11,6 +14,7 @@ class AdminDashboardPage extends StatefulWidget {
 }
 
 class _AdminDashboardPageState extends State<AdminDashboardPage> {
+  // Die routeName-Zeile wurde von hier entfernt.
 
   Future<void> _showEditStartNumberDialog(DocumentSnapshot runnerDoc) async {
     final runnerData = runnerDoc.data() as Map<String, dynamic>;
@@ -33,7 +37,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         if (mounted) Navigator.of(context).pop();
       } catch (e) {
         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Fehler beim Speichern: $e")));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Fehler beim Speichern: $e")));
         }
       }
     }
@@ -74,7 +78,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ),
       body: Column(
         children: [
-          // Button-Sektion
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Center(
@@ -86,6 +89,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     context,
                     MaterialPageRoute(builder: (context) => const CountingStationPage()),
                   );
+
                 },
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -94,8 +98,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             ),
           ),
           const Divider(),
-
-          // Tabellen-Sektion
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance

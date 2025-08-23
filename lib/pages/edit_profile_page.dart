@@ -7,7 +7,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
 
 class EditProfilePage extends StatefulWidget {
+  // NEU: Definiert den "Straßennamen" für diese Seite
+  static const routeName = '/edit_profile';
+
   const EditProfilePage({super.key});
+
   @override
   State<EditProfilePage> createState() => _EditProfilePageState();
 }
@@ -32,10 +36,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   Future<void> _loadUserData() async {
     if (_currentUser == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection("Laufer")
-          .doc(_currentUser.uid)
-          .get();
+      final doc = await FirebaseFirestore.instance.collection("Laufer").doc(_currentUser!.uid).get();
       if (doc.exists && mounted) {
         final data = doc.data()!;
         setState(() {
@@ -46,8 +47,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
           _profileImageUrl = data['profileImageUrl'] ?? '';
           _isLoading = false;
         });
-      } else if (mounted) {
-        setState(() => _isLoading = false);
+      } else {
+        if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
@@ -60,12 +61,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (pickedFile == null) return;
 
     final bytes = await pickedFile.readAsBytes();
+
     img.Image? image = img.decodeImage(bytes);
     if (image == null) return;
 
     img.Image resizedImage = img.copyResize(image, width: 800);
-    final compressedBytes =
-        Uint8List.fromList(img.encodeJpg(resizedImage, quality: 85));
+    final compressedBytes = Uint8List.fromList(img.encodeJpg(resizedImage, quality: 85));
 
     if (mounted) {
       setState(() {
@@ -74,54 +75,41 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  // HIER IST DIE EINZIGE ÄNDERUNG ZUM STABILEN CODE
   Future<void> _saveProfile() async {
     if (_currentUser == null) return;
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Der Name darf nicht leer sein.")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Der Name darf nicht leer sein.")));
       return;
     }
 
-    showDialog(
-        context: context,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-        barrierDismissible: false);
+    showDialog(context: context, builder: (context) => const Center(child: CircularProgressIndicator()));
 
-    String imageUrlToSave = _profileImageUrl;
+    String newImageUrl = _profileImageUrl;
 
     try {
       if (_selectedImageBytes != null) {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('profile_images')
-            .child(_currentUser.uid);
+        final ref = FirebaseStorage.instance.ref().child('profile_images').child(_currentUser!.uid);
         await ref.putData(_selectedImageBytes!);
-        imageUrlToSave = await ref.getDownloadURL();
+        newImageUrl = await ref.getDownloadURL();
       }
 
-      await FirebaseFirestore.instance
-          .collection("Laufer")
-          .doc(_currentUser.uid)
-          .set({
+      await FirebaseFirestore.instance.collection("Laufer").doc(_currentUser!.uid).update({
         'name': _nameController.text.trim(),
         'teamName': _teamNameController.text.trim(),
         'motivation': _motivationController.text.trim(),
         'isPublic': _isPublic,
-        'profileImageUrl': imageUrlToSave,
-      }, SetOptions(merge: true));
+        'profileImageUrl': newImageUrl,
+      });
 
       if (mounted) {
-        // ZUERST den Ladekreis schließen
-        Navigator.of(context).pop();
-        // DANN zur Profilseite zurückkehren
-        Navigator.of(context).pop();
+        Navigator.pop(context); // Ladekreis
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profil erfolgreich gespeichert!")));
+        Navigator.pop(context); // Zurück zur Profilseite
       }
     } catch (e) {
       if (mounted) {
-        Navigator.of(context).pop(); // Ladekreis auch im Fehlerfall schließen
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Fehler beim Speichern: $e")));
+        Navigator.pop(context); // Ladekreis
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Fehler beim Speichern: $e")));
       }
     }
   }
@@ -148,72 +136,53 @@ class _EditProfilePageState extends State<EditProfilePage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24.0),
+        children: [
+          Center(
+            child: Stack(
               children: [
-                Center(
-                  child: Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 60,
-                        backgroundColor: Colors.grey[300],
-                        backgroundImage: backgroundImage,
-                        child: backgroundImage == null
-                            ? const Icon(Icons.person,
-                                size: 60, color: Colors.grey)
-                            : null,
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: CircleAvatar(
-                          backgroundColor:
-                              Theme.of(context).colorScheme.secondary,
-                          child: IconButton(
-                              icon: const Icon(Icons.camera_alt,
-                                  color: Colors.white),
-                              onPressed: _pickImage),
-                        ),
-                      )
-                    ],
+                CircleAvatar(
+                  radius: 60,
+                  backgroundColor: Colors.grey[300],
+                  backgroundImage: backgroundImage,
+                  child: backgroundImage == null ? const Icon(Icons.person, size: 60, color: Colors.grey) : null,
+                ),
+                Positioned(
+                  bottom: 0, right: 0,
+                  child: CircleAvatar(
+                    backgroundColor: Theme.of(context).colorScheme.secondary,
+                    child: IconButton(icon: const Icon(Icons.camera_alt, color: Colors.white), onPressed: _pickImage),
                   ),
-                ),
-                const SizedBox(height: 30),
-                TextField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
-                        labelText: "Voller Name (Pflichtfeld)")),
-                const SizedBox(height: 20),
-                TextField(
-                    controller: _teamNameController,
-                    decoration: const InputDecoration(
-                        labelText: "Teamname (optional)")),
-                const SizedBox(height: 20),
-                TextField(
-                    controller: _motivationController,
-                    decoration:
-                        const InputDecoration(labelText: "Meine Motivation..."),
-                    maxLines: 4),
-                const SizedBox(height: 30),
-                SwitchListTile(
-                  title: const Text("Profil öffentlich anzeigen"),
-                  subtitle: const Text(
-                      "Dein Name und Bild erscheinen auf der Startseite."),
-                  value: _isPublic,
-                  onChanged: (bool value) => setState(() => _isPublic = value),
-                  activeColor: Theme.of(context).colorScheme.secondary,
-                ),
-                const SizedBox(height: 40),
-                ElevatedButton.icon(
-                  onPressed: _saveProfile,
-                  icon: const Icon(Icons.save),
-                  label: const Text("Änderungen speichern"),
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.secondary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16)),
                 )
               ],
             ),
+          ),
+          const SizedBox(height: 30),
+          TextField(controller: _nameController, decoration: const InputDecoration(labelText: "Voller Name")),
+          const SizedBox(height: 20),
+          TextField(controller: _teamNameController, decoration: const InputDecoration(labelText: "Teamname (optional)")),
+          const SizedBox(height: 20),
+          TextField(controller: _motivationController, decoration: const InputDecoration(labelText: "Meine Motivation..."), maxLines: 4),
+          const SizedBox(height: 30),
+          SwitchListTile(
+            title: const Text("Profil öffentlich anzeigen"),
+            subtitle: const Text("Dein Name und Bild erscheinen auf der Startseite."),
+            value: _isPublic,
+            onChanged: (bool value) => setState(() => _isPublic = value),
+            activeColor: Theme.of(context).colorScheme.secondary,
+          ),
+          const SizedBox(height: 40),
+          ElevatedButton.icon(
+            onPressed: _saveProfile,
+            icon: const Icon(Icons.save),
+            label: const Text("Änderungen speichern"),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.secondary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16)),
+          )
+        ],
+      ),
     );
   }
 }
