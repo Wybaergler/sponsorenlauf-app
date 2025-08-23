@@ -3,15 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/auth/auth_gate.dart';
 import 'package:sponsorenlauf_app/components/runner_tile.dart';
-import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
 import 'package:sponsorenlauf_app/pages/leaderboard_page.dart';
 import 'package:sponsorenlauf_app/pages/profile_page.dart';
-import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 
 class PublicLandingPage extends StatefulWidget {
-  // NEU: Definiert den "Straßennamen" für diese Seite
   static const routeName = '/';
-
   const PublicLandingPage({super.key});
 
   @override
@@ -83,26 +79,14 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                   Center(
                     child: isLoggedIn
                         ? ElevatedButton.icon(
-                      onPressed: () {
-                        // GEÄNDERT: Navigation über Routenname
-                        Navigator.pushNamed(context, ProfilePage.routeName);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(0, 50),
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                      ),
+                      onPressed: () => Navigator.pushNamed(context, ProfilePage.routeName),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50), padding: const EdgeInsets.symmetric(horizontal: 24)),
                       icon: const Icon(Icons.person),
                       label: const Text("Zu meinem Konto"),
                     )
                         : ElevatedButton.icon(
-                      onPressed: () {
-                        // GEÄNDERT: Navigation über Routenname
-                        Navigator.pushNamed(context, AuthGate.routeName);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(0, 50),
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                      ),
+                      onPressed: () => Navigator.pushNamed(context, AuthGate.routeName),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50), padding: const EdgeInsets.symmetric(horizontal: 24)),
                       icon: const Icon(Icons.directions_run),
                       label: const Text("Registrieren / Anmelden für Läufer"),
                     ),
@@ -110,17 +94,8 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                   const SizedBox(height: 10),
                   Center(
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => const LeaderboardPage()),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        minimumSize: const Size(0, 50),
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                      ),
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LeaderboardPage())),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(0, 50), padding: const EdgeInsets.symmetric(horizontal: 24)),
                       icon: const Icon(Icons.leaderboard),
                       label: const Text("Lauf live mitverfolgen"),
                     ),
@@ -136,12 +111,7 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                         return const Text("Ein Fehler ist aufgetreten.");
                       }
                       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(32.0),
-                            child: Text("Noch keine öffentlichen Läuferprofile."),
-                          ),
-                        );
+                        return const Center(child: Padding(padding: EdgeInsets.all(32.0), child: Text("Noch keine öffentlichen Läuferprofile.")));
                       }
                       final users = snapshot.data!.docs;
                       return ListView.builder(
@@ -151,13 +121,11 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                         itemBuilder: (context, index) {
                           final userDocument = users[index];
                           final userData = userDocument.data() as Map<String, dynamic>;
-
                           final name = userData['name'] ?? userData['email'];
                           final imageUrl = userData['profileImageUrl'] ?? '';
                           final runnerId = userDocument.id;
                           final teamName = userData['teamName'] ?? '';
                           final motivation = userData['motivation'] ?? '';
-
                           return RunnerTile(
                             runnerId: runnerId,
                             name: name,

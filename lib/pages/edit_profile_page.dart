@@ -7,9 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
 
 class EditProfilePage extends StatefulWidget {
-  // NEU: Definiert den "Straßennamen" für diese Seite
   static const routeName = '/edit_profile';
-
   const EditProfilePage({super.key});
 
   @override
@@ -36,7 +34,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
   Future<void> _loadUserData() async {
     if (_currentUser == null) return;
     try {
-      final doc = await FirebaseFirestore.instance.collection("Laufer").doc(_currentUser!.uid).get();
+      // HIER '!' ENTFERNT
+      final doc = await FirebaseFirestore.instance.collection("Laufer").doc(_currentUser.uid).get();
       if (doc.exists && mounted) {
         final data = doc.data()!;
         setState(() {
@@ -61,7 +60,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (pickedFile == null) return;
 
     final bytes = await pickedFile.readAsBytes();
-
     img.Image? image = img.decodeImage(bytes);
     if (image == null) return;
 
@@ -88,12 +86,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     try {
       if (_selectedImageBytes != null) {
-        final ref = FirebaseStorage.instance.ref().child('profile_images').child(_currentUser!.uid);
+        // HIER '!' ENTFERNT
+        final ref = FirebaseStorage.instance.ref().child('profile_images').child(_currentUser.uid);
         await ref.putData(_selectedImageBytes!);
         newImageUrl = await ref.getDownloadURL();
       }
 
-      await FirebaseFirestore.instance.collection("Laufer").doc(_currentUser!.uid).update({
+      // HIER '!' ENTFERNT
+      await FirebaseFirestore.instance.collection("Laufer").doc(_currentUser.uid).update({
         'name': _nameController.text.trim(),
         'teamName': _teamNameController.text.trim(),
         'motivation': _motivationController.text.trim(),
