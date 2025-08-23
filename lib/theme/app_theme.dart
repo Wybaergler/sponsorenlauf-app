@@ -1,0 +1,51 @@
+import 'package:flutter/material.dart';
+
+class AppTheme {
+  static const Color primaryYellow = Color(0xFFFFD200);
+  static const Color primaryBlue = Color(0xFF005DA4);
+  static const Color lightGrey = Color(0xFFF5F5F5);
+  static const Color darkGrey = Color(0xFF616161);
+  static const Color white = Colors.white;
+
+  static ThemeData get theme {
+    return ThemeData(
+      primaryColor: primaryYellow,
+      scaffoldBackgroundColor: lightGrey,
+      colorScheme: ColorScheme.fromSwatch().copyWith(
+        primary: primaryYellow,
+        secondary: primaryBlue,
+        onPrimary: primaryBlue,
+        onSecondary: white,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: primaryYellow,
+        foregroundColor: primaryBlue,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryBlue,
+          foregroundColor: white,
+          minimumSize: const Size(double.infinity, 50),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: primaryBlue,
+          textStyle: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        floatingLabelStyle: TextStyle(color: darkGrey),
+        border: OutlineInputBorder(),
+        focusedBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: primaryBlue),
+        ),
+      ),
+    );
+  }
+}
