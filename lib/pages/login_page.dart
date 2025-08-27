@@ -1,11 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:sponsorenlauf_app/pages/login_success_page.dart';
 import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
 
 class LoginPage extends StatefulWidget {
-  // NEU: Definiert den "Straßennamen" für diese Seite
-  static const routeName = '/login';
-
   final VoidCallback showRegisterPage;
   const LoginPage({super.key, required this.showRegisterPage});
 
@@ -18,17 +16,28 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
 
   Future<void> _signIn() async {
-    showDialog(context: context, builder: (context) => const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+    final navContext = context;
+    showDialog(context: navContext, builder: (context) => const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // Die Navigation wird jetzt vom AuthGate übernommen. Wir schließen nur noch den Ladekreis.
-      if (mounted) Navigator.pop(context);
+
+      if (mounted) {
+        // --- HIER IST DIE ÄNDERUNG ---
+        // Navigiere zur neuen, statischen Erfolgsseite.
+        Navigator.of(navContext).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginSuccessPage()),
+              (route) => false,
+        );
+      }
     } on FirebaseAuthException catch (e) {
-      if (mounted) Navigator.pop(context);
-      _showErrorDialog(e.message ?? "Ein unbekannter Fehler ist aufgetreten.");
+      if (mounted) {
+        Navigator.pop(navContext); // Ladekreis entfernen
+        _showErrorDialog(e.message ?? "Ein unbekannter Fehler ist aufgetreten.");
+      }
     }
   }
 
@@ -69,14 +78,13 @@ class _LoginPageState extends State<LoginPage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text('Noch kein Konto?', style: TextStyle(color: Colors.grey[700])),
-                    TextButton(onPressed: widget.showRegisterPage, child: Text('Hier registrieren', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold))),
+                    TextButton(onPressed: widget.showRegisterPage, child: Text('Hier einloggen', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold))),
                   ],
                 ),
                 const SizedBox(height: 20),
                 TextButton.icon(
                   onPressed: () {
-                    // GEÄNDERT: Saubere Navigation zur Startseite
-                    Navigator.popAndPushNamed(context, PublicLandingPage.routeName);
+                    Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const PublicLandingPage()), (route) => false);
                   },
                   icon: const Icon(Icons.arrow_back),
                   label: const Text("Zurück zum Sponsorenlauf"),

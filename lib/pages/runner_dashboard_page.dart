@@ -3,27 +3,20 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart';
-import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
-import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
-import 'package:sponsorenlauf_app/auth/auth_gate.dart';
 import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
+import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
+import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
+import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 
-// KORRIGIERTER KLASSENNAME
 class RunnerDashboardPage extends StatefulWidget {
-  static const routeName = '/profile'; // Der Routenname bleibt gleich
+  static const routeName = '/profile';
   final bool showSuccessDialog;
-
-  const RunnerDashboardPage({
-    super.key,
-    this.showSuccessDialog = false,
-  });
+  const RunnerDashboardPage({super.key, this.showSuccessDialog = false});
 
   @override
-  // KORRIGIERTER STATE-KLASSENNAME
   State<RunnerDashboardPage> createState() => _RunnerDashboardPageState();
 }
 
-// KORRIGIERTER STATE-KLASSENNAME
 class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
   final currentUser = FirebaseAuth.instance.currentUser;
   Map<String, dynamic>? _userData;
@@ -46,9 +39,7 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text("Registrierung erfolgreich!"),
-        content: const Text(
-          "Super, du bist als Läufer:in beim Sponsorenlauf registriert. Fülle als nächstes dein Profil aus, um Sponsoren zu finden.",
-        ),
+        content: const Text("Super, du bist als Läufer:in beim Sponsorenlauf registriert. Fülle als nächstes dein Profil aus, um Sponsoren zu finden."),
         actions: [
           ElevatedButton(
             onPressed: () {
@@ -69,7 +60,41 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
   Future<void> signOut() async {
     await FirebaseAuth.instance.signOut();
     if (mounted) {
-      Navigator.pushNamedAndRemoveUntil(context, AuthGate.routeName, (route) => false);
+      Navigator.pushNamedAndRemoveUntil(context, PublicLandingPage.routeName, (route) => false);
+    }
+  }
+
+  Future<void> _deleteSponsorship(String docId, String sponsorName) async {
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Spende löschen?"),
+        content: Text("Möchten Sie die Spendenzusage von '$sponsorName' wirklich endgültig löschen?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("Abbrechen"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text("Löschen"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm ?? false) {
+      try {
+        await FirebaseFirestore.instance.collection('Spenden').doc(docId).delete();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sponsor wurde gelöscht."), backgroundColor: Colors.green));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Fehler beim Löschen: $e")));
+        }
+      }
     }
   }
 
@@ -90,12 +115,18 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
             final imageUrl = _userData!['profileImageUrl'] ?? '';
             final bool isAdmin = (_userData!['role'] ?? 'user') == 'admin';
             final int lapCount = _userData!['rundenAnzahl'] ?? 0;
-
             return Scaffold(
               appBar: AppBar(
-                title: const Text("Mein Dashboard"), // Titel angepasst
+                leading: IconButton(
+                  icon: const Icon(Icons.home),
+                  tooltip: "Zurück zur Startseite",
+                  onPressed: () {
+                    Navigator.pushNamedAndRemoveUntil(context, PublicLandingPage.routeName, (route) => false);
+                  },
+                ),
+                title: const Text("Mein Dashboard"),
                 actions: [
-                  IconButton(onPressed: signOut, icon: const Icon(Icons.logout))
+                  IconButton(onPressed: signOut, icon: const Icon(Icons.logout), tooltip: "Ausloggen")
                 ],
               ),
               body: ListView(
@@ -112,8 +143,6 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
                   const SizedBox(height: 24),
                   _buildProfileDetailRow("Name", _userData!['name'] ?? 'Nicht angegeben'),
                   _buildProfileDetailRow("E-Mail", _userData!['email'] ?? 'Nicht angegeben'),
-                  _buildProfileDetailRow("Team", _userData!['teamName'] ?? 'Kein Team'),
-                  _buildProfileDetailRow("Motivation", _userData!['motivation'] ?? 'Keine Angabe'),
                   _buildProfileDetailRow("Sichtbarkeit", (_userData!['isPublic'] ?? true) ? "Öffentlich" : "Privat"),
                   const SizedBox(height: 20),
                   ElevatedButton.icon(
@@ -126,9 +155,7 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
                     const Text("Admin Bereich", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pushNamed(context, AdminDashboardPage.routeName);
-                      },
+                      onPressed: () => Navigator.pushNamed(context, AdminDashboardPage.routeName),
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.red[700]),
                       icon: const Icon(Icons.admin_panel_settings),
                       label: const Text("Lauf verwalten"),
@@ -171,7 +198,7 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
                               formattedTime = DateFormat('HH:mm:ss').format(timestamp);
                             }
                             return Text("• Runde erfasst um $formattedTime durch ${lapData['stationName']}");
-                          }).toList(),
+                          }),
                         ],
                       );
                     },
@@ -208,6 +235,7 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
                             DataColumn(label: Text('Fix (CHF)'), numeric: true),
                             DataColumn(label: Text('Pro Runde (CHF)'), numeric: true),
                             DataColumn(label: Text('Total (prov.)'), numeric: true),
+                            DataColumn(label: Text('Aktion')),
                           ],
                           rows: sponsorships.map((doc) {
                             final sponsor = doc.data() as Map<String, dynamic>;
@@ -218,16 +246,22 @@ class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
                             final perLapAmount = isFixed ? 0.0 : amount;
                             final totalAmount = fixedAmount + (perLapAmount * lapCount);
                             return DataRow(
-                                onSelectChanged: addedByRunner ? (selected) {
-                                  if (selected ?? false) {
-                                    Navigator.pushNamed(context, SponsoringPage.routeName, arguments: SponsoringPageArguments(runnerId: currentUser!.uid, sponsorshipId: doc.id));
-                                  }
-                                } : null,
                                 cells: [
-                                  DataCell(Text(sponsor['sponsorName'], style: TextStyle(color: addedByRunner ? Colors.blue : null, decoration: addedByRunner ? TextDecoration.underline : null))),
+                                  DataCell(
+                                    Text(sponsor['sponsorName'], style: TextStyle(color: addedByRunner ? Colors.blue : null, decoration: addedByRunner ? TextDecoration.underline : null)),
+                                    onTap: addedByRunner ? () => Navigator.pushNamed(context, SponsoringPage.routeName, arguments: SponsoringPageArguments(runnerId: currentUser!.uid, sponsorshipId: doc.id)) : null,
+                                  ),
                                   DataCell(Text(fixedAmount > 0 ? fixedAmount.toStringAsFixed(2) : '-')),
                                   DataCell(Text(perLapAmount > 0 ? perLapAmount.toStringAsFixed(2) : '-')),
                                   DataCell(Text(totalAmount.toStringAsFixed(2))),
+                                  DataCell(
+                                    addedByRunner
+                                        ? IconButton(
+                                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                      onPressed: () => _deleteSponsorship(doc.id, sponsor['sponsorName']),
+                                    )
+                                        : const SizedBox.shrink(),
+                                  ),
                                 ]);
                           }).toList(),
                         ),

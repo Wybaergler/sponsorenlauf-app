@@ -3,7 +3,7 @@ import 'package:sponsorenlauf_app/pages/login_page.dart';
 import 'package:sponsorenlauf_app/pages/register_page.dart';
 
 class LoginOrRegister extends StatefulWidget {
-  // NEU: Definiert den "Straßennamen" für diese Seite
+  // --- HIER IST DIE NEUE ZEILE ---
   static const routeName = '/login_or_register';
 
   const LoginOrRegister({super.key});

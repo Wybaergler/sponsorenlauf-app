@@ -6,9 +6,7 @@ import 'package:flutter/services.dart';
 enum SponsoringType { perLap, fixed }
 
 class SponsoringPage extends StatefulWidget {
-  // NEU: Definiert den "Straßennamen" für diese Seite
   static const routeName = '/sponsorship';
-
   final String runnerId;
   final String? sponsorshipId;
 
@@ -23,7 +21,7 @@ class SponsoringPage extends StatefulWidget {
 }
 
 class _SponsoringPageState extends State<SponsoringPage> {
-  late final Future<DocumentSnapshot> _runnerFuture;
+  late Future<DocumentSnapshot> _runnerFuture;
   final _formKey = GlobalKey<FormState>();
   SponsoringType _sponsoringType = SponsoringType.perLap;
 
@@ -37,9 +35,29 @@ class _SponsoringPageState extends State<SponsoringPage> {
   @override
   void initState() {
     super.initState();
-    _runnerFuture = FirebaseFirestore.instance.collection('Laufer').doc(widget.runnerId).get();
+    String runnerIdForFuture = widget.runnerId;
+
+    if (_isEditMode && runnerIdForFuture.isEmpty) {
+      _runnerFuture = _loadRunnerIdFromSponsorship().then((id) {
+        runnerIdForFuture = id;
+        return FirebaseFirestore.instance.collection('Laufer').doc(id).get();
+      });
+    } else {
+      _runnerFuture = FirebaseFirestore.instance.collection('Laufer').doc(runnerIdForFuture).get();
+    }
+
     if (_isEditMode) {
       _loadSponsorshipData();
+    }
+  }
+
+  Future<String> _loadRunnerIdFromSponsorship() async {
+    if (widget.sponsorshipId == null) return '';
+    try {
+      final doc = await FirebaseFirestore.instance.collection('Spenden').doc(widget.sponsorshipId).get();
+      return doc.data()?['runnerId'] ?? '';
+    } catch (e) {
+      return '';
     }
   }
 
@@ -57,7 +75,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
         });
       }
     } catch (e) {
-      // Fehlerbehandlung
+      debugPrint("Fehler beim Laden der Sponsoring-Daten: $e");
     }
   }
 
@@ -78,7 +96,9 @@ class _SponsoringPageState extends State<SponsoringPage> {
           'email': runnerDoc.data()?['email'] ?? '',
         };
       }
-    } catch (e) {}
+    } catch (e) {
+      debugPrint("Fehler beim Laden der Läufer-Daten: $e");
+    }
     return {'name': 'Einem Läufer', 'email': ''};
   }
 
@@ -86,18 +106,17 @@ class _SponsoringPageState extends State<SponsoringPage> {
     if (!(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-
     showDialog(context: context, builder: (context) => const Center(child: CircularProgressIndicator()));
 
     try {
       final amount = double.tryParse(_amountController.text.trim()) ?? 0.0;
-      final sponsorshipData = {
+      final bool wasAddedByRunner = !_isEditMode && _isOpenedByRunner;
+      final Map<String, dynamic> sponsorshipData = {
         'runnerId': widget.runnerId,
         'sponsorName': _sponsorNameController.text.trim(),
         'sponsorEmail': _sponsorEmailController.text.trim(),
         'amount': amount,
         'sponsoringType': _sponsoringType.name,
-        'addedByRunner': !_isEditMode && _isOpenedByRunner,
       };
 
       String sponsorshipDocId;
@@ -107,11 +126,12 @@ class _SponsoringPageState extends State<SponsoringPage> {
         await FirebaseFirestore.instance.collection('Spenden').doc(sponsorshipDocId).update(sponsorshipData);
       } else {
         sponsorshipData['createdAt'] = FieldValue.serverTimestamp();
+        sponsorshipData['addedByRunner'] = wasAddedByRunner;
         final docRef = await FirebaseFirestore.instance.collection('Spenden').add(sponsorshipData);
         sponsorshipDocId = docRef.id;
       }
 
-      if (!_isEditMode && !_isOpenedByRunner) {
+      if (!_isEditMode) {
         final runnerData = await _getRunnerData();
         final runnerName = runnerData['name']!;
         final runnerEmail = runnerData['email']!;
@@ -122,13 +142,26 @@ class _SponsoringPageState extends State<SponsoringPage> {
         } else {
           zusageText = "einen Betrag von <b>CHF ${amount.toStringAsFixed(2)} pro Runde</b>";
         }
+
+        String sponsorshipLinkHtml = '';
+        if (!wasAddedByRunner) {
+          sponsorshipLinkHtml = '<p>Sollten Sie Ihre Zusage bearbeiten wollen, können Sie dies über den folgenden Link tun:</p><p><a href="https://$projectId.web.app/sponsorship/$sponsorshipDocId">Ihre Zusage bearbeiten</a></p>';
+        }
+
         await FirebaseFirestore.instance.collection('mail').add({
           'to': [_sponsorEmailController.text.trim()],
           'message': {
-            'subject': 'Vielen Dank für Ihre Unterstützung!',
-            'html': '<p>Hallo ${_sponsorNameController.text.trim()},</p><p>vielen Dank für Ihre Zusage, <b>$runnerName</b> beim Sponsorenlauf der EVP mit $zusageText zu unterstützen.</p><p>Ihre Zusage wurde erfolgreich erfasst. Der Läufer $runnerName wurde ebenfalls direkt per E-Mail informiert. Nach dem Lauf werden wir Sie über den finalen Spendenbetrag informieren.</p><p>Sollten Sie Ihre Zusage bearbeiten wollen, können Sie dies über den folgenden Link tun:</p><p><a href="https://$projectId.web.app/sponsorship/$sponsorshipDocId">Ihre Zusage bearbeiten</a></p><p>Mit freundlichen Grüssen,<br>Ihr Sponsorenlauf-Team</p>',
+            'subject': 'Bestätigung Ihrer Unterstützung für den Sponsorenlauf!',
+            'html': '''
+              <p>Hallo ${_sponsorNameController.text.trim()},</p>
+              <p>vielen Dank für Ihre Zusage, <b>$runnerName</b> beim Sponsorenlauf der EVP mit $zusageText zu unterstützen.</p>
+              <p>Ihre Zusage wurde erfolgreich erfasst. Der Läufer $runnerName wurde ebenfalls direkt per E-Mail informiert. Nach dem Lauf werden wir Sie über den finalen Spendenbetrag informieren.</p>
+              $sponsorshipLinkHtml
+              <p>Mit freundlichen Grüssen,<br>Ihr Sponsorenlauf-Team</p>
+            ''',
           },
         });
+
         if (runnerEmail.isNotEmpty) {
           await FirebaseFirestore.instance.collection('mail').add({
             'to': [runnerEmail],
@@ -161,7 +194,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
         content: Text(
           _isEditMode
               ? "Die Zusage wurde erfolgreich aktualisiert."
-              : "Ihre Zusage wurde erfolgreich gespeichert. Falls Sie eine E-Mail angegeben haben, erhalten Sie in Kürze eine Bestätigung.",
+              : "Ihre Zusage wurde erfolgreich gespeichert. Eine Bestätigung wurde an die angegebene E-Mail Adresse gesendet.",
         ),
         actions: [
           ElevatedButton(
@@ -299,7 +332,7 @@ class _SponsoringPageState extends State<SponsoringPage> {
                         decoration: InputDecoration(
                           labelText: "E-Mail des Sponsors *",
                           helperText: _isOpenedByRunner
-                              ? "Falls keine E-Mail vorhanden, gib deine eigene ein."
+                              ? "Gib die E-Mail des Sponsors an oder deine eigene, falls die Abrechnung über dich laufen soll."
                               : "Wird für die Bestätigung und Abrechnung verwendet.",
                         ),
                         validator: (value) {

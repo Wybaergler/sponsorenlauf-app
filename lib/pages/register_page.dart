@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:sponsorenlauf_app/auth/auth_gate.dart';
 import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
+import 'package:sponsorenlauf_app/pages/registration_success_page.dart';
 
 class RegisterPage extends StatefulWidget {
-  static const routeName = '/register';
   final VoidCallback showLoginPage;
   const RegisterPage({super.key, required this.showLoginPage});
+
   @override
   State<RegisterPage> createState() => _RegisterPageState();
 }
@@ -20,24 +20,45 @@ class _RegisterPageState extends State<RegisterPage> {
   Future<void> _signUp() async {
     final navContext = context;
     showDialog(context: navContext, builder: (context) => const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+
     if (_passwordController.text != _confirmPasswordController.text) {
       Navigator.pop(navContext);
       _showErrorDialog("Die Passwörter stimmen nicht überein.");
       return;
     }
+
     try {
       UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: _emailController.text.trim(), password: _passwordController.text.trim());
-      await FirebaseFirestore.instance.collection("Laufer").doc(userCredential.user!.uid).set({'uid': userCredential.user!.uid, 'email': _emailController.text.trim(), 'name': '', 'teamName': '', 'motivation': '', 'profileImageUrl': '', 'isPublic': true, 'role': 'user'});
+
+      await FirebaseFirestore.instance.collection("Laufer").doc(userCredential.user!.uid).set({
+        'uid': userCredential.user!.uid,
+        'email': _emailController.text.trim(),
+        'name': '',
+        'teamName': '',
+        'motivation': '',
+        'profileImageUrl': '',
+        'isPublic': true,
+        'role': 'user'
+      });
+
+      final projectId = FirebaseFirestore.instance.app.options.projectId;
       await FirebaseFirestore.instance.collection("mail").add({
         'to': [_emailController.text.trim()],
-        'message': {'subject': 'Willkommen beim EVP Sponsorenlauf!', 'html': '<p>Hallo!</p><p>Vielen Dank für deine Registrierung.</p>'},
+        'message': {
+          'subject': 'Willkommen beim EVP Sponsorenlauf!',
+          'html': '<p>Hallo!</p><p>Vielen Dank für deine Registrierung.</p>',
+        },
       });
+
       if (mounted) {
+        // --- HIER IST DIE ÄNDERUNG ---
+        // Navigiere zur neuen, statischen Erfolgsseite.
         Navigator.of(navContext).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const LoggedInLandingPage()),
+          MaterialPageRoute(builder: (context) => const RegistrationSuccessPage()),
               (route) => false,
         );
       }
+
     } on FirebaseAuthException catch (e) {
       if (mounted) {
         Navigator.pop(navContext);
@@ -91,7 +112,13 @@ class _RegisterPageState extends State<RegisterPage> {
                 ),
                 const SizedBox(height: 20),
                 TextButton.icon(
-                  onPressed: () => Navigator.popAndPushNamed(context, PublicLandingPage.routeName),
+                  onPressed: () {
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (context) => const PublicLandingPage()),
+                          (Route<dynamic> route) => false,
+                    );
+                  },
                   icon: const Icon(Icons.arrow_back),
                   label: const Text("Zurück zum Sponsorenlauf"),
                 ),
