@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:sponsorenlauf_app/auth/auth_gate.dart';
 import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
-import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart'; // KORRIGIERTER PFAD
+import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart';
 import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
-import 'package:sponsorenlauf_app/pages/profile_page.dart';
+import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart'; // KORRIGIERTER IMPORT
 import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
 import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 import 'package:sponsorenlauf_app/theme/app_theme.dart';
@@ -32,7 +32,7 @@ class MyApp extends StatelessWidget {
       routes: {
         PublicLandingPage.routeName: (context) => const PublicLandingPage(),
         AuthGate.routeName: (context) => const AuthGate(),
-        ProfilePage.routeName: (context) => const ProfilePage(),
+        RunnerDashboardPage.routeName: (context) => const RunnerDashboardPage(), // KORRIGIERTER KLASSENNAME
         EditProfilePage.routeName: (context) => const EditProfilePage(),
         AdminDashboardPage.routeName: (context) => const AdminDashboardPage(),
       },

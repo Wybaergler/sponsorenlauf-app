@@ -2,22 +2,29 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart'; // KORRIGIERTER PFAD
-import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
+import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart';
 import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
 import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 import 'package:sponsorenlauf_app/auth/auth_gate.dart';
+import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
 
-class ProfilePage extends StatefulWidget {
-  static const routeName = '/profile';
+// KORRIGIERTER KLASSENNAME
+class RunnerDashboardPage extends StatefulWidget {
+  static const routeName = '/profile'; // Der Routenname bleibt gleich
   final bool showSuccessDialog;
-  const ProfilePage({super.key, this.showSuccessDialog = false});
+
+  const RunnerDashboardPage({
+    super.key,
+    this.showSuccessDialog = false,
+  });
 
   @override
-  State<ProfilePage> createState() => _ProfilePageState();
+  // KORRIGIERTER STATE-KLASSENNAME
+  State<RunnerDashboardPage> createState() => _RunnerDashboardPageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+// KORRIGIERTER STATE-KLASSENNAME
+class _RunnerDashboardPageState extends State<RunnerDashboardPage> {
   final currentUser = FirebaseAuth.instance.currentUser;
   Map<String, dynamic>? _userData;
 
@@ -39,7 +46,9 @@ class _ProfilePageState extends State<ProfilePage> {
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text("Registrierung erfolgreich!"),
-        content: const Text("Super, du bist als Läufer:in beim Sponsorenlauf registriert. Fülle als nächstes dein Profil aus, um Sponsoren zu finden."),
+        content: const Text(
+          "Super, du bist als Läufer:in beim Sponsorenlauf registriert. Fülle als nächstes dein Profil aus, um Sponsoren zu finden.",
+        ),
         actions: [
           ElevatedButton(
             onPressed: () {
@@ -81,9 +90,10 @@ class _ProfilePageState extends State<ProfilePage> {
             final imageUrl = _userData!['profileImageUrl'] ?? '';
             final bool isAdmin = (_userData!['role'] ?? 'user') == 'admin';
             final int lapCount = _userData!['rundenAnzahl'] ?? 0;
+
             return Scaffold(
               appBar: AppBar(
-                title: const Text("Mein Profil"),
+                title: const Text("Mein Dashboard"), // Titel angepasst
                 actions: [
                   IconButton(onPressed: signOut, icon: const Icon(Icons.logout))
                 ],
@@ -172,13 +182,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     children: [
                       const Text("Meine Sponsoren", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                       ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pushNamed(
-                            context,
-                            SponsoringPage.routeName,
-                            arguments: SponsoringPageArguments(runnerId: currentUser!.uid),
-                          );
-                        },
+                        onPressed: () => Navigator.pushNamed(context, SponsoringPage.routeName, arguments: SponsoringPageArguments(runnerId: currentUser!.uid)),
                         style: ElevatedButton.styleFrom(minimumSize: const Size(120, 40), textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                         icon: const Icon(Icons.add, size: 18),
                         label: const Text("Hinzufügen"),
@@ -216,14 +220,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             return DataRow(
                                 onSelectChanged: addedByRunner ? (selected) {
                                   if (selected ?? false) {
-                                    Navigator.pushNamed(
-                                      context,
-                                      SponsoringPage.routeName,
-                                      arguments: SponsoringPageArguments(
-                                        runnerId: currentUser!.uid,
-                                        sponsorshipId: doc.id,
-                                      ),
-                                    );
+                                    Navigator.pushNamed(context, SponsoringPage.routeName, arguments: SponsoringPageArguments(runnerId: currentUser!.uid, sponsorshipId: doc.id));
                                   }
                                 } : null,
                                 cells: [

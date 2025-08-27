@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/auth/auth_gate.dart';
 import 'package:sponsorenlauf_app/components/runner_tile.dart';
 import 'package:sponsorenlauf_app/pages/leaderboard_page.dart';
-import 'package:sponsorenlauf_app/pages/profile_page.dart';
+import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart'; // KORRIGIERTER IMPORT
+import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
+import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 
 class PublicLandingPage extends StatefulWidget {
   static const routeName = '/';
@@ -79,13 +81,18 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                   Center(
                     child: isLoggedIn
                         ? ElevatedButton.icon(
-                      onPressed: () => Navigator.pushNamed(context, ProfilePage.routeName),
+                      onPressed: () {
+                        // KORRIGIERTER KLASSENNAME
+                        Navigator.pushNamed(context, RunnerDashboardPage.routeName);
+                      },
                       style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50), padding: const EdgeInsets.symmetric(horizontal: 24)),
                       icon: const Icon(Icons.person),
                       label: const Text("Zu meinem Konto"),
                     )
                         : ElevatedButton.icon(
-                      onPressed: () => Navigator.pushNamed(context, AuthGate.routeName),
+                      onPressed: () {
+                        Navigator.pushNamed(context, AuthGate.routeName);
+                      },
                       style: ElevatedButton.styleFrom(minimumSize: const Size(0, 50), padding: const EdgeInsets.symmetric(horizontal: 24)),
                       icon: const Icon(Icons.directions_run),
                       label: const Text("Registrieren / Anmelden für Läufer"),
@@ -94,7 +101,9 @@ class _PublicLandingPageState extends State<PublicLandingPage> {
                   const SizedBox(height: 10),
                   Center(
                     child: ElevatedButton.icon(
-                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LeaderboardPage())),
+                      onPressed: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const LeaderboardPage()));
+                      },
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(0, 50), padding: const EdgeInsets.symmetric(horizontal: 24)),
                       icon: const Icon(Icons.leaderboard),
                       label: const Text("Lauf live mitverfolgen"),
