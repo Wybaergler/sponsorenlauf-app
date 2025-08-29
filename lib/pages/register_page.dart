@@ -13,63 +13,15 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
+  // Neu: Form + Validierung
+  final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
-  Future<void> _signUp() async {
-    final navContext = context;
-    showDialog(context: navContext, builder: (context) => const Center(child: CircularProgressIndicator()), barrierDismissible: false);
-
-    if (_passwordController.text != _confirmPasswordController.text) {
-      Navigator.pop(navContext);
-      _showErrorDialog("Die Passwörter stimmen nicht überein.");
-      return;
-    }
-
-    try {
-      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: _emailController.text.trim(), password: _passwordController.text.trim());
-
-      await FirebaseFirestore.instance.collection("Laufer").doc(userCredential.user!.uid).set({
-        'uid': userCredential.user!.uid,
-        'email': _emailController.text.trim(),
-        'name': '',
-        'teamName': '',
-        'motivation': '',
-        'profileImageUrl': '',
-        'isPublic': true,
-        'role': 'user'
-      });
-
-      final projectId = FirebaseFirestore.instance.app.options.projectId;
-      await FirebaseFirestore.instance.collection("mail").add({
-        'to': [_emailController.text.trim()],
-        'message': {
-          'subject': 'Willkommen beim EVP Sponsorenlauf!',
-          'html': '<p>Hallo!</p><p>Vielen Dank für deine Registrierung.</p>',
-        },
-      });
-
-      if (mounted) {
-        // --- HIER IST DIE ÄNDERUNG ---
-        // Navigiere zur neuen, statischen Erfolgsseite.
-        Navigator.of(navContext).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const RegistrationSuccessPage()),
-              (route) => false,
-        );
-      }
-
-    } on FirebaseAuthException catch (e) {
-      if (mounted) {
-        Navigator.pop(navContext);
-        _showErrorDialog(e.message ?? "Ein unbekannter Fehler ist aufgetreten.");
-      }
-    }
-  }
-
-  void _showErrorDialog(String message) {
-    showDialog(context: context, builder: (context) => AlertDialog(title: const Text("Registrierung fehlgeschlagen"), content: Text(message), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK"))]));
-  }
+  bool _obscurePass = true;
+  bool _obscureConfirm = true;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -79,50 +31,280 @@ class _RegisterPageState extends State<RegisterPage> {
     super.dispose();
   }
 
+  String? _validateEmail(String? v) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return 'Bitte E-Mail eingeben.';
+    final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(s);
+    if (!ok) return 'Die E-Mail-Adresse ist ungültig.';
+    return null;
+  }
+
+  String? _validatePassword(String? v) {
+    final s = (v ?? '');
+    if (s.isEmpty) return 'Bitte Passwort eingeben.';
+    if (s.length < 6) return 'Mindestens 6 Zeichen.';
+    return null;
+  }
+
+  String? _validateConfirm(String? v) {
+    final s = (v ?? '');
+    if (s.isEmpty) return 'Bitte Passwort bestätigen.';
+    if (s != _passwordController.text) return 'Die Passwörter stimmen nicht überein.';
+    return null;
+  }
+
+  String _friendlyAuthError(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'email-already-in-use':
+        return 'Mit dieser E-Mail gibt es bereits ein Konto.';
+      case 'invalid-email':
+        return 'Die E-Mail-Adresse ist ungültig.';
+      case 'weak-password':
+        return 'Passwort ist zu schwach (mind. 6 Zeichen).';
+      case 'operation-not-allowed':
+        return 'E-Mail/Passwort-Registrierung ist nicht aktiviert.';
+      case 'network-request-failed':
+        return 'Keine Netzwerkverbindung.';
+      default:
+        return 'Registrierung fehlgeschlagen. Bitte später erneut versuchen.';
+    }
+  }
+
+  Future<void> _signUp() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final nav = Navigator.of(context);
+    setState(() => _loading = true);
+
+    // Ladeindikator (in jedem Pfad wieder schließen)
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      // Firestore-Profil anlegen (wie in deinem Code)
+      await FirebaseFirestore.instance.collection("Laufer").doc(credential.user!.uid).set({
+        'uid': credential.user!.uid,
+        'email': _emailController.text.trim(),
+        'name': '',
+        'teamName': '',
+        'motivation': '',
+        'profileImageUrl': '',
+        'isPublic': true,
+        'role': 'user',
+      });
+
+      // Begrüssungs-Mail (wie in deinem Code)
+      await FirebaseFirestore.instance.collection("mail").add({
+        'to': [_emailController.text.trim()],
+        'message': {
+          'subject': 'Willkommen beim EVP Sponsorenlauf!',
+          'html': '<p>Hallo!</p><p>Vielen Dank für deine Registrierung.</p>',
+        },
+      });
+
+      if (!mounted) return;
+      nav.pop(); // Loader schließen
+      nav.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const RegistrationSuccessPage()),
+            (route) => false,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      nav.pop(); // Loader schließen
+      _showErrorDialog(_friendlyAuthError(e));
+    } catch (e) {
+      if (!mounted) return;
+      nav.pop(); // Loader schließen
+      _showErrorDialog('Unerwarteter Fehler. Bitte später erneut versuchen.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Registrierung fehlgeschlagen"),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK"))],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(elevation: 0, backgroundColor: Colors.transparent, foregroundColor: Colors.grey[800]),
-      backgroundColor: Colors.grey[200],
+      // Konsistente AppBar (Farben via app_theme.dart / colorScheme)
+      appBar: AppBar(
+        title: const Text('Registrieren'),
+        elevation: 0,
+      ),
+      backgroundColor: Colors.grey[200], // wie bei dir
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Image.asset('assets/images/logo.png', height: 150),
-                const SizedBox(height: 50),
-                const Text('Als Läufer neu registrieren', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
-                TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: InputDecoration(hintText: 'E-Mail', prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
-                const SizedBox(height: 10),
-                TextField(controller: _passwordController, obscureText: true, decoration: InputDecoration(hintText: 'Passwort', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
-                const SizedBox(height: 10),
-                TextField(controller: _confirmPasswordController, obscureText: true, decoration: InputDecoration(hintText: 'Passwort bestätigen', prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]), enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white), borderRadius: BorderRadius.all(Radius.circular(12))), focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade400), borderRadius: const BorderRadius.all(Radius.circular(12))), fillColor: Colors.white, filled: true)),
-                const SizedBox(height: 20),
-                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _signUp, style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.secondary, foregroundColor: Colors.white, padding: const EdgeInsets.all(20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Registrieren', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('Bereits ein Konto?', style: TextStyle(color: Colors.grey[700])),
-                    TextButton(onPressed: widget.showLoginPage, child: Text('Hier einloggen', style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold))),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                TextButton.icon(
-                  onPressed: () {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (context) => const PublicLandingPage()),
-                          (Route<dynamic> route) => false,
-                    );
-                  },
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text("Zurück zum Sponsorenlauf"),
-                ),
-              ],
+            child: Form(
+              key: _formKey,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset('assets/images/logo.png', height: 150),
+                  const SizedBox(height: 24),
+
+                  // Subline statt großem Formular-Titel
+                  Text(
+                    'Erstelle dein Läufer-Konto.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // E-Mail
+                  TextFormField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.email],
+                    decoration: InputDecoration(
+                      labelText: 'E-Mail',
+                      hintText: 'name@example.com',
+                      prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[500]),
+                      enabledBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white),
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.grey).copyWith(width: 1),
+                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                      ),
+                      fillColor: Colors.white,
+                      filled: true,
+                    ),
+                    validator: _validateEmail,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Passwort
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: _obscurePass,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.newPassword],
+                    decoration: InputDecoration(
+                      labelText: 'Passwort',
+                      prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]),
+                      suffixIcon: IconButton(
+                        tooltip: _obscurePass ? 'Passwort anzeigen' : 'Passwort ausblenden',
+                        icon: Icon(_obscurePass ? Icons.visibility : Icons.visibility_off),
+                        onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                      ),
+                      enabledBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white),
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.grey).copyWith(width: 1),
+                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                      ),
+                      fillColor: Colors.white,
+                      filled: true,
+                    ),
+                    validator: _validatePassword,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Passwort bestätigen
+                  TextFormField(
+                    controller: _confirmPasswordController,
+                    obscureText: _obscureConfirm,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _signUp(),
+                    decoration: InputDecoration(
+                      labelText: 'Passwort bestätigen',
+                      prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[500]),
+                      suffixIcon: IconButton(
+                        tooltip: _obscureConfirm ? 'Passwort anzeigen' : 'Passwort ausblenden',
+                        icon: Icon(_obscureConfirm ? Icons.visibility : Icons.visibility_off),
+                        onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                      ),
+                      enabledBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white),
+                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.grey).copyWith(width: 1),
+                        borderRadius: const BorderRadius.all(Radius.circular(12)),
+                      ),
+                      fillColor: Colors.white,
+                      filled: true,
+                    ),
+                    validator: _validateConfirm,
+                  ),
+
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _loading ? null : _signUp,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.secondary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.all(20),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: _loading
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Text('Registrieren', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Bereits ein Konto?', style: TextStyle(color: Colors.grey[700])),
+                      TextButton(
+                        onPressed: _loading ? null : widget.showLoginPage,
+                        child: Text(
+                          'Zum Login',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.secondary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (context) => const PublicLandingPage()),
+                            (Route<dynamic> route) => false,
+                      );
+                    },
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text("Zurück zum Sponsorenlauf"),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

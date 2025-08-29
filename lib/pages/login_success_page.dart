@@ -1,12 +1,53 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
+import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
 
 class LoginSuccessPage extends StatelessWidget {
   const LoginSuccessPage({super.key});
 
+  Future<void> _signOut(BuildContext context) async {
+    final nav = Navigator.of(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      await FirebaseAuth.instance.signOut();
+      if (!nav.mounted) return;
+      nav.pop(); // Loader schließen
+      nav.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const PublicLandingPage()),
+            (route) => false,
+      );
+    } catch (_) {
+      if (!nav.mounted) return;
+      nav.pop(); // Loader schließen
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Abmelden fehlgeschlagen. Bitte erneut versuchen.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Angemeldet'),
+        elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Abmelden',
+            icon: const Icon(Icons.logout),
+            onPressed: () => _signOut(context),
+          ),
+        ],
+      ),
       backgroundColor: Colors.grey[200],
       body: SafeArea(
         child: Center(
@@ -16,9 +57,10 @@ class LoginSuccessPage extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.check_circle_outline,
+                  Icons.check_circle,            // ausgefüllt
                   size: 120,
-                  color: Theme.of(context).colorScheme.secondary,
+                  color: cs.secondary,            // gleiches Blau wie Button
+                  semanticLabel: 'Erfolgreich angemeldet',
                 ),
                 const SizedBox(height: 32),
                 const Text(
@@ -37,6 +79,8 @@ class LoginSuccessPage extends StatelessWidget {
                       );
                     },
                     style: ElevatedButton.styleFrom(
+                      backgroundColor: cs.secondary, // explizit gleiches Blau
+                      foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
