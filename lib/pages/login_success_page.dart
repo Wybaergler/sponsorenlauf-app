@@ -1,94 +1,47 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
-import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
 
-class LoginSuccessPage extends StatelessWidget {
+class LoginSuccessPage extends StatefulWidget {
   const LoginSuccessPage({super.key});
 
-  Future<void> _signOut(BuildContext context) async {
-    final nav = Navigator.of(context);
+  @override
+  State<LoginSuccessPage> createState() => _LoginSuccessPageState();
+}
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+class _LoginSuccessPageState extends State<LoginSuccessPage> {
+  @override
+  void initState() {
+    super.initState();
+    _autoNavigate();
+  }
+
+  Future<void> _autoNavigate() async {
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+
+    // Stack vollständig leeren und direkt ins Dashboard
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const RunnerDashboardPage()),
+          (route) => false,
     );
-
-    try {
-      await FirebaseAuth.instance.signOut();
-      if (!nav.mounted) return;
-      nav.pop(); // Loader schließen
-      nav.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const PublicLandingPage()),
-            (route) => false,
-      );
-    } catch (_) {
-      if (!nav.mounted) return;
-      nav.pop(); // Loader schließen
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Abmelden fehlgeschlagen. Bitte erneut versuchen.')),
-      );
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Angemeldet'),
-        elevation: 0,
-        actions: [
-          IconButton(
-            tooltip: 'Abmelden',
-            icon: const Icon(Icons.logout),
-            onPressed: () => _signOut(context),
-          ),
-        ],
-      ),
-      backgroundColor: Colors.grey[200],
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.check_circle,            // ausgefüllt
-                  size: 120,
-                  color: cs.secondary,            // gleiches Blau wie Button
-                  semanticLabel: 'Erfolgreich angemeldet',
-                ),
-                const SizedBox(height: 32),
-                const Text(
-                  "Willkommen zurück!",
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 40),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (context) => const RunnerDashboardPage()),
-                            (route) => false,
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: cs.secondary, // explizit gleiches Blau
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    child: const Text("Zu meinem Dashboard"),
-                  ),
-                ),
-              ],
-            ),
+      appBar: AppBar(title: const Text('Login erfolgreich')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.check_circle, size: 72),
+              SizedBox(height: 16),
+              Text('Du bist eingeloggt.', textAlign: TextAlign.center, style: TextStyle(fontSize: 18)),
+              SizedBox(height: 24),
+              CircularProgressIndicator(),
+            ],
           ),
         ),
       ),

@@ -5,11 +5,9 @@ import 'package:sponsorenlauf_app/auth/login_or_register.dart'; // WICHTIGER IMP
 import 'package:sponsorenlauf_app/components/runner_tile.dart';
 import 'package:sponsorenlauf_app/pages/leaderboard_page.dart';
 import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
-import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
-import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
 
 class PublicLandingPage extends StatefulWidget {
-  static const routeName = '/';
+  static const routeName = '/public';
   const PublicLandingPage({super.key});
 
   @override
