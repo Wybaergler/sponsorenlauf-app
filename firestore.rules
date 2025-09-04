@@ -1,25 +1,88 @@
-// Firestore Security Rules – MVP-sicher
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Standard: Nur angemeldete Nutzer dürfen lesen/schreiben
-    match /{document=**} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/Laufer/$(request.auth.uid))
+        && get(/databases/$(database)/documents/Laufer/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // Spezieller Schutz: jeder User nur sein eigenes Profil
-    match /users/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
+    // Läufer-Profile
+    match /Laufer/{userId} {
+      // Öffentlich lesbar (falls zu offen, später auf isSignedIn() ändern)
+      allow read: if true;
+
+      // Nutzer darf sein eigenes Profil anlegen
       allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update, delete: if isSignedIn() && request.auth.uid == userId;
+
+      // Update: eigener Datensatz ohne Rollen-Eskalation ODER Admin
+      allow update: if isAdmin()
+        || (isSignedIn()
+            && request.auth.uid == userId
+            && request.resource.data.role == resource.data.role);
+
+      // Löschen nur Admin
+      allow delete: if isAdmin();
+    }
+
+    // Event/Lauf – Status öffentlich, Änderungen nur Admin
+    match /Lauf/{laufId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Spenden – öffentlich lesbar/erstellbar, aber mit Basis-Constraints
+    match /Spenden/{spendeId} {
+      allow read: if true;
+
+      allow create: if
+        request.resource.data.keys().hasAll(['runnerId','amount','currency'])
+        && (request.resource.data.runnerId is string)
+        && exists(/databases/$(database)/documents/Laufer/$(request.resource.data.runnerId))
+        && (request.resource.data.amount is number && request.resource.data.amount > 0)
+        && (request.resource.data.currency is string);
+
+      // Update/Delete: Admin ODER der Runner, der den Datensatz erstellt hat (addedByRunner == true)
+      allow update, delete: if
+        isAdmin()
+        || ( isSignedIn()
+             && resource.data.addedByRunner == true
+             && resource.data.runnerId == request.auth.uid
+             && request.resource.data.runnerId == resource.data.runnerId
+             && request.resource.data.addedByRunner == resource.data.addedByRunner );
+    }
+
+    // Runden – nur Admin (create/delete), keine Updates
+    match /Runden/{rundeId} {
+      allow read, create, delete: if isAdmin();
+      allow update: if false;
+    }
+
+    // Abrechnungen – nur Admin
+    match /abrechnungen/{docId} {
+      allow create, read, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Mail/Outbox – nur create mit minimalem Schema (empfohlen: später via Cloud Function/App Check)
+    match /mail/{mailId} {
+      allow create: if
+        request.resource.data.keys().hasOnly(['to','subject','message','createdAt'])
+        && (request.resource.data.to is string)
+        && (request.resource.data.subject is string)
+        && (request.resource.data.message is string);
+      allow read, update, delete: if false;
+    }
+
+    // Fallback: alles andere dicht
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
