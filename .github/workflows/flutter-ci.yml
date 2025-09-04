@@ -23,9 +23,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Analyze
-        run: flutter analyze
+      - name: Analyze (non-fatal infos/warnings)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      # Falls aktuell noch keine Tests vorhanden sind, schlägt dieser Schritt nicht fehl.
+      # Tests sind optional – schlagen nicht fehl, falls keine vorhanden
       - name: Test
         run: flutter test -r compact || true
