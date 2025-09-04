@@ -5,36 +5,35 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// MVP Counting Station:
-/// - Pflicht: Station + Zähler (lokal gespeichert)
-/// - Nur eigene Station in der Liste (letzte 15)
-/// - Keyboard-first (Enter zählt), Mobile: großer + Button
-/// - Undo der letzten Runde (30s)
+/// Zählerstation nach UI-Spez:
+/// - EIN Pflichtfeld "Identity" (Stations-/Zählername), lokal gespeichert
+/// - Identity wird als stationName UND counterName geschrieben
+/// - Erfassung: Startnummer groß, Enter/„+“ zählt
+/// - Liste: ALLE Erfassungen dieser Identity (neueste oben)
+/// - Papierkorb pro Zeile mit kurzer Inline-Bestätigung (kein Dialog, kein Löschgrund)
 class CountingStationPage extends StatefulWidget {
   const CountingStationPage({super.key});
-
   @override
   State<CountingStationPage> createState() => _CountingStationPageState();
 }
 
 class _CountingStationPageState extends State<CountingStationPage> {
+  final _identityCtrl = TextEditingController();
   final _startCtrl = TextEditingController();
   final _startFocus = FocusNode();
 
-  String? _stationName;
-  String? _counterName;
+  String? _identity; // Pflichtfeld
+  bool _editingIdentity = false;
 
-  bool _isAdmin = false;
   bool _loading = true;
+  bool _isAdmin = false;
   String _status = '';
 
-  // Undo
-  String? _lastLapId;
-  DateTime? _lastLapAt;
-  Timer? _undoTimer;
-
-  // Cooldown gegen Doppelzählungen (per Startnummer)
+  // Doppel-Tap-Schutz (kurzer Cooldown pro Startnummer)
   final Map<int, DateTime> _cooldown = {};
+
+  // Cache: runnerId -> Läufername (schont Firestore)
+  final Map<String, String> _runnerNameCache = {};
 
   @override
   void initState() {
@@ -44,7 +43,7 @@ class _CountingStationPageState extends State<CountingStationPage> {
 
   @override
   void dispose() {
-    _undoTimer?.cancel();
+    _identityCtrl.dispose();
     _startCtrl.dispose();
     _startFocus.dispose();
     super.dispose();
@@ -55,21 +54,18 @@ class _CountingStationPageState extends State<CountingStationPage> {
       // Admin-Check
       final u = FirebaseAuth.instance.currentUser;
       if (u != null) {
-        final doc = await FirebaseFirestore.instance.collection('Laufer').doc(u.uid).get();
-        _isAdmin = (doc.data()?['role'] == 'admin');
+        final userDoc = await FirebaseFirestore.instance.collection('Laufer').doc(u.uid).get();
+        _isAdmin = (userDoc.data()?['role'] == 'admin');
       }
 
-      // Station/Zähler aus Local Storage
+      // Identity aus Local Storage
       final prefs = await SharedPreferences.getInstance();
-      _stationName = prefs.getString('cs_station');
-      _counterName = prefs.getString('cs_counter');
+      _identity = prefs.getString('cs_identity');
+      _identityCtrl.text = _identity ?? '';
 
       setState(() => _loading = false);
 
-      // Fokus direkt setzen, wenn Setup komplett
-      if (_stationName != null && _stationName!.isNotEmpty && mounted) {
-        _requestFocus();
-      }
+      if (_identity != null && _identity!.isNotEmpty) _requestFocus();
     } catch (e) {
       setState(() {
         _loading = false;
@@ -84,79 +80,59 @@ class _CountingStationPageState extends State<CountingStationPage> {
     });
   }
 
-  Future<void> _openSettings() async {
-    final stationCtrl = TextEditingController(text: _stationName ?? '');
-    final counterCtrl = TextEditingController(text: _counterName ?? '');
-    final res = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Zählerstation einrichten'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: stationCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Stationsname (z. B. "Tor A")',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: counterCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Zählername (dein Name)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Beides ist Pflicht. Wird lokal gespeichert.'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Abbrechen')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Speichern')),
-        ],
-      ),
-    );
+  bool get _setupComplete => (_identity ?? '').isNotEmpty;
 
-    if (res == true) {
-      final s = stationCtrl.text.trim();
-      final c = counterCtrl.text.trim();
-      if (s.isEmpty || c.isEmpty) {
-        setState(() => _status = 'Bitte Station und Zähler angeben.');
-        return;
-      }
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('cs_station', s);
-      await prefs.setString('cs_counter', c);
-      setState(() {
-        _stationName = s;
-        _counterName = c;
-        _status = 'Station/Zähler gespeichert.';
-      });
-      _requestFocus();
+  Future<void> _saveIdentity() async {
+    final id = _identityCtrl.text.trim();
+    if (id.isEmpty) {
+      setState(() => _status = 'Bitte Stations-/Zählername eingeben.');
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cs_identity', id);
+    setState(() {
+      _identity = id;
+      _editingIdentity = false;
+      _status = 'Zählerstation gespeichert.';
+    });
+    _requestFocus();
+  }
+
+  String _fmtTime(DateTime t) => DateFormat.Hms().format(t);
+
+  // Läufername aus "Laufer/{runnerId}" lesen & cachen
+  Future<String> _getRunnerName(String runnerId) async {
+    if (_runnerNameCache.containsKey(runnerId)) return _runnerNameCache[runnerId]!;
+    try {
+      final d = await FirebaseFirestore.instance.collection('Laufer').doc(runnerId).get();
+      final m = d.data() ?? {};
+      String name = _bestName(m);
+      _runnerNameCache[runnerId] = name;
+      return name;
+    } catch (_) {
+      return '';
     }
   }
 
-  bool get _setupComplete =>
-      (_stationName ?? '').isNotEmpty && (_counterName ?? '').isNotEmpty;
-
-  String _fmt(DateTime t) => DateFormat.Hms().format(t);
+  String _bestName(Map<String, dynamic> m) {
+    final a = (m['displayName'] ?? '').toString().trim();
+    if (a.isNotEmpty) return a;
+    // Mögliche Felder im Projekt abdecken
+    final fn = (m['firstName'] ?? m['vorname'] ?? '').toString().trim();
+    final ln = (m['lastName'] ?? m['nachname'] ?? m['name'] ?? '').toString().trim();
+    final combo = [fn, ln].where((s) => s.isNotEmpty).join(' ');
+    if (combo.isNotEmpty) return combo;
+    final nick = (m['nickname'] ?? m['spitzname'] ?? '').toString().trim();
+    return nick;
+  }
 
   Future<void> _countLap() async {
     if (!_setupComplete) {
-      setState(() => _status = 'Bitte zuerst Station/Zähler einrichten.');
+      setState(() => _status = 'Zuerst Stations-/Zählername setzen.');
       return;
     }
     if (!_isAdmin) {
-      setState(() => _status = 'Keine Berechtigung: Nur Admins dürfen zählen.');
+      setState(() => _status = 'Keine Berechtigung: nur Admins dürfen zählen.');
       return;
     }
 
@@ -171,7 +147,7 @@ class _CountingStationPageState extends State<CountingStationPage> {
       return;
     }
 
-    // Cooldown (2s) pro Startnummer
+    // kleiner Cooldown (~1.5s) gegen Doppelzählung
     final now = DateTime.now();
     final last = _cooldown[startNumber];
     if (last != null && now.difference(last).inMilliseconds < 1500) {
@@ -183,7 +159,7 @@ class _CountingStationPageState extends State<CountingStationPage> {
     setState(() => _status = 'Zähle #$startNumber …');
 
     try {
-      // Runner via Startnummer finden
+      // Runner via Startnummer
       final q = await FirebaseFirestore.instance
           .collection('Laufer')
           .where('startNumber', isEqualTo: startNumber)
@@ -196,56 +172,22 @@ class _CountingStationPageState extends State<CountingStationPage> {
       }
       final runnerId = q.docs.first.id;
 
-      // Runde anlegen
-      final ref = await FirebaseFirestore.instance.collection('Runden').add({
+      await FirebaseFirestore.instance.collection('Runden').add({
         'runnerId': runnerId,
         'startNumber': startNumber,
-        'stationName': _stationName,
-        'counterName': _counterName,
+        'stationName': _identity,
+        'counterName': _identity,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Undo-Fenster (30s)
-      _undoTimer?.cancel();
-      _lastLapId = ref.id;
-      _lastLapAt = DateTime.now();
-      _undoTimer = Timer(const Duration(seconds: 30), () {
-        if (!mounted) return;
-        setState(() {
-          _lastLapId = null;
-          _lastLapAt = null;
-        });
-      });
-
       setState(() {
-        _status = 'Gezählt #$startNumber • ${_fmt(DateTime.now())}';
+        _status = 'Gezählt #$startNumber • ${_fmtTime(DateTime.now())}';
         _startCtrl.clear();
       });
-
       _requestFocus();
     } catch (e) {
       setState(() => _status = 'Fehler: $e');
     }
-  }
-
-  Future<void> _undoLast() async {
-    if (_lastLapId == null || _lastLapAt == null) return;
-    final age = DateTime.now().difference(_lastLapAt!);
-    if (age > const Duration(seconds: 30)) {
-      setState(() => _status = 'Zu spät zum Rückgängig machen.');
-      return;
-    }
-    try {
-      await FirebaseFirestore.instance.collection('Runden').doc(_lastLapId).delete();
-      setState(() {
-        _status = 'Letzte Runde entfernt.';
-        _lastLapId = null;
-        _lastLapAt = null;
-      });
-    } catch (e) {
-      setState(() => _status = 'Undo fehlgeschlagen: $e');
-    }
-    _requestFocus();
   }
 
   @override
@@ -258,44 +200,76 @@ class _CountingStationPageState extends State<CountingStationPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Zählerstation'),
-        actions: [
-          IconButton(
-            tooltip: 'Einstellungen',
-            onPressed: _openSettings,
-            icon: const Icon(Icons.settings),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Zählerstation')),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
+          constraints: const BoxConstraints(maxWidth: 1000),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Setup-Hinweis (Pflicht)
-                if (!_setupComplete)
-                  Card(
-                    color: Colors.yellow.shade50,
-                    child: ListTile(
-                      leading: const Icon(Icons.warning_amber_outlined),
-                      title: const Text('Station & Zähler noch nicht gesetzt'),
-                      subtitle: const Text('Bitte oben rechts auf „Einstellungen“ tippen.'),
-                      trailing: FilledButton(
-                        onPressed: _openSettings,
-                        child: const Text('Einrichten'),
-                      ),
-                    ),
+                // Gelber Banner
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade200),
                   ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: _editingIdentity || !_setupComplete
+                      ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Zählerstation festlegen', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _identityCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'z. B. „Tor A – René“',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          FilledButton(onPressed: _saveIdentity, child: const Text('Speichern')),
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: () => setState(() => _editingIdentity = false),
+                            child: const Text('Abbrechen'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                      : Row(
+                    children: [
+                      const Icon(Icons.badge_outlined),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Zählerstation: ${_identity!}',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => setState(() => _editingIdentity = true),
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Ändern'),
+                      ),
+                    ],
+                  ),
+                ),
 
-                // Eingabezeile
+                const SizedBox(height: 12),
+
+                // Erfassung: Startnummer groß + „Zählen“
                 LayoutBuilder(
                   builder: (context, c) {
-                    final isNarrow = c.maxWidth < 560;
+                    final isNarrow = c.maxWidth < 640;
                     return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: TextField(
@@ -306,10 +280,11 @@ class _CountingStationPageState extends State<CountingStationPage> {
                             decoration: InputDecoration(
                               labelText: _setupComplete
                                   ? 'Startnummer (Enter = zählen)'
-                                  : 'Startnummer (erst Einrichten)',
+                                  : 'Startnummer (erst Station speichern)',
                               border: const OutlineInputBorder(),
                             ),
                             enabled: _setupComplete && _isAdmin,
+                            style: const TextStyle(fontSize: 22),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -328,29 +303,25 @@ class _CountingStationPageState extends State<CountingStationPage> {
                 ),
 
                 const SizedBox(height: 8),
-                // Status + Undo
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _status,
-                        style: TextStyle(color: _status.startsWith('Fehler') ? Colors.red : Colors.black54),
-                      ),
-                    ),
-                    if (_lastLapId != null)
-                      FilledButton.tonalIcon(
-                        onPressed: _undoLast,
-                        icon: const Icon(Icons.undo),
-                        label: const Text('Rückgängig (30s)'),
-                      ),
-                  ],
+
+                // Statuszeile
+                Text(
+                  _status,
+                  style: TextStyle(
+                    color: _status.startsWith('Fehler') ? Colors.red : Colors.black54,
+                  ),
                 ),
 
                 const SizedBox(height: 12),
 
-                // Letzte 15 der eigenen Station
+                // Liste aller Erfassungen dieser Identity (neueste oben)
                 Expanded(
-                  child: _StationRecentList(stationName: _stationName),
+                  child: _IdentityEntriesList(
+                    identity: _identity,
+                    isAdmin: _isAdmin,
+                    runnerNameCache: _runnerNameCache,
+                    getRunnerName: _getRunnerName,
+                  ),
                 ),
               ],
             ),
@@ -361,52 +332,119 @@ class _CountingStationPageState extends State<CountingStationPage> {
   }
 }
 
-class _StationRecentList extends StatelessWidget {
-  final String? stationName;
-  const _StationRecentList({required this.stationName});
+class _IdentityEntriesList extends StatefulWidget {
+  final String? identity;
+  final bool isAdmin;
+  final Map<String, String> runnerNameCache;
+  final Future<String> Function(String runnerId) getRunnerName;
+
+  const _IdentityEntriesList({
+    required this.identity,
+    required this.isAdmin,
+    required this.runnerNameCache,
+    required this.getRunnerName,
+  });
+
+  @override
+  State<_IdentityEntriesList> createState() => _IdentityEntriesListState();
+}
+
+class _IdentityEntriesListState extends State<_IdentityEntriesList> {
+  // Für Inline-Löschbestätigung
+  final Set<String> _confirming = {};
 
   @override
   Widget build(BuildContext context) {
-    if (stationName == null || stationName!.isEmpty) {
-      return const Center(child: Text('Keine Station gewählt.'));
+    final identity = widget.identity;
+    if (identity == null || identity.isEmpty) {
+      return const Center(child: Text('Keine Zählerstation gesetzt.'));
     }
 
     final q = FirebaseFirestore.instance
         .collection('Runden')
-        .where('stationName', isEqualTo: stationName)
-        .orderBy('createdAt', descending: true)
-        .limit(15);
+        .where('stationName', isEqualTo: identity)
+        .orderBy('createdAt', descending: true); // volle Liste, neueste oben
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: q.snapshots(),
       builder: (context, snap) {
-        if (snap.hasError) {
-          return Center(child: Text('Fehler: ${snap.error}'));
-        }
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
+        if (snap.hasError) return Center(child: Text('Fehler: ${snap.error}'));
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+
         final docs = snap.data!.docs;
-        if (docs.isEmpty) {
-          return const Center(child: Text('Noch keine Runden an dieser Station.'));
-        }
+        if (docs.isEmpty) return const Center(child: Text('Noch keine Erfassungen.'));
 
         return ListView.separated(
           itemCount: docs.length,
           separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (_, i) {
-            final d = docs[i].data();
-            final sn = (d['startNumber'] ?? '').toString();
-            final counter = (d['counterName'] ?? '').toString();
-            final ts = d['createdAt'] is Timestamp
-                ? (d['createdAt'] as Timestamp).toDate().toLocal()
+          itemBuilder: (context, i) {
+            final doc = docs[i];
+            final m = doc.data();
+            final startNumber = (m['startNumber'] ?? '').toString();
+            final runnerId = (m['runnerId'] ?? '').toString();
+            final ts = m['createdAt'] is Timestamp
+                ? (m['createdAt'] as Timestamp).toDate().toLocal()
                 : null;
             final when = ts == null ? '—' : DateFormat.Hms().format(ts);
-            return ListTile(
-              dense: true,
-              leading: CircleAvatar(child: Text(sn.isEmpty ? '—' : sn)),
-              title: Text('Zähler: ${counter.isEmpty ? '—' : counter}'),
-              subtitle: Text(when),
+
+            return FutureBuilder<String>(
+              future: runnerId.isEmpty ? Future.value('') : widget.getRunnerName(runnerId),
+              builder: (context, nameSnap) {
+                final runnerName = nameSnap.data ?? '';
+
+                final confirming = _confirming.contains(doc.id);
+
+                return ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    child: Text(
+                      startNumber.isEmpty ? '—' : startNumber,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          runnerName.isEmpty ? ' ' : runnerName,
+                          textAlign: TextAlign.right,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Text(when),
+                  trailing: confirming
+                      ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: () async {
+                          // Hard-Delete (gemäß bestehenden Regeln)
+                          try {
+                            await FirebaseFirestore.instance.collection('Runden').doc(doc.id).delete();
+                          } catch (_) {}
+                          if (!mounted) return;
+                          setState(() => _confirming.remove(doc.id));
+                        },
+                        child: const Text('Ja'),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton(
+                        onPressed: () => setState(() => _confirming.remove(doc.id)),
+                        child: const Text('Nein'),
+                      ),
+                    ],
+                  )
+                      : IconButton(
+                    tooltip: 'Löschen',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: widget.isAdmin
+                        ? () => setState(() => _confirming.add(doc.id))
+                        : null,
+                  ),
+                );
+              },
             );
           },
         );
