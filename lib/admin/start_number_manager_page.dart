@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:sponsorenlauf_app/admin/start_number_edit_page.dart';
 
 class StartNumberManagerPage extends StatefulWidget {
   const StartNumberManagerPage({super.key});
@@ -75,7 +76,7 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
 
           final docs = snap.data!.docs.toList();
 
-          // Lokale, stabile Sortierung: erst Startnummer (nulls zuletzt), dann Name
+          // Stabil sortieren: erst Startnummer (nulls zuletzt), dann Name
           docs.sort((a, b) {
             int? sa = _toIntOrNull(a.data()['startNumber']);
             int? sb = _toIntOrNull(b.data()['startNumber']);
@@ -102,30 +103,24 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
               final data = d.data();
               final name = _nameOf(d);
               final sn = _toIntOrNull(data['startNumber']);
+
               return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 4),
-                            Text('UID: ${d.id}', style: const TextStyle(color: Colors.black54)),
-                            const SizedBox(height: 4),
-                            Text('Startnummer: ${sn?.toString() ?? '—'}'),
-                          ],
-                        ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: () => _editStartNumber(context, d.id, sn),
-                        icon: const Icon(Icons.edit),
-                        label: const Text('Bearbeiten'),
-                      ),
-                    ],
+                child: ListTile(
+                  leading: CircleAvatar(
+                    child: Text(sn?.toString() ?? '—'),
                   ),
+                  title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('UID: ${d.id}'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => StartNumberEditPage(
+                        runnerId: d.id,
+                        displayName: name,
+                        current: sn,
+                      ),
+                    ));
+                  },
                 ),
               );
             },
@@ -133,66 +128,6 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
         },
       ),
     );
-  }
-
-  Future<void> _editStartNumber(BuildContext context, String runnerId, int? current) async {
-    final ctrl = TextEditingController(text: current?.toString() ?? '');
-    final result = await showDialog<int?>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Startnummer setzen'),
-        content: SizedBox(
-          width: 360,
-          child: TextField(
-            controller: ctrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Startnummer (leer für entfernen)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Abbrechen')),
-          FilledButton(
-            onPressed: () {
-              final v = ctrl.text.trim();
-              if (v.isEmpty) {
-                Navigator.pop<int?>(ctx, null); // entfernen
-              } else {
-                final n = int.tryParse(v);
-                if (n == null) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('Bitte eine gültige Zahl eingeben.')),
-                  );
-                } else {
-                  Navigator.pop<int?>(ctx, n);
-                }
-              }
-            },
-            child: const Text('Speichern'),
-          ),
-        ],
-      ),
-    );
-
-    if (!mounted) return;
-    if (result == null && ctrl.text.trim().isEmpty == false) {
-      // Abgebrochen oder ungültig → nichts tun
-      return;
-    }
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('Laufer')
-          .doc(runnerId)
-          .set({'startNumber': result}, SetOptions(merge: true));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gespeichert.')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Fehler: $e')));
-    }
   }
 
   static int? _toIntOrNull(dynamic v) {
