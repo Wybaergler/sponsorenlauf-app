@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 
 // Pages
 import 'package:sponsorenlauf_app/admin/sponsor_invoices_page.dart';
-import 'package:sponsorenlauf_app/admin/final_accounting_page.dart'; // optionaler Button
+import 'package:sponsorenlauf_app/admin/final_accounting_page.dart'; // optional
+import 'package:sponsorenlauf_app/admin/counting_station_page.dart'; // Zählerstation (bestehend)
+import 'package:sponsorenlauf_app/admin/start_number_manager_page.dart'; // NEU: Startnummern-Vergabe
 
 class AdminDashboardPage extends StatefulWidget {
   const AdminDashboardPage({super.key});
@@ -68,14 +70,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      // Wichtig: kein `const` vor Scaffold
       return Scaffold(
         appBar: AppBar(title: const Text('Admin')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
-    // Nicht eingeloggt
     if (_user == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Admin')),
@@ -93,7 +93,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       );
     }
 
-    // Kein Admin
     if (!_isAdmin) {
       return Scaffold(
         appBar: AppBar(title: const Text('Admin')),
@@ -119,7 +118,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       );
     }
 
-    // Admin-Übersicht
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin-Dashboard'),
@@ -133,12 +131,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
+          constraints: const BoxConstraints(maxWidth: 1000),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: LayoutBuilder(
               builder: (context, c) {
-                final isNarrow = c.maxWidth < 640;
+                final isNarrow = c.maxWidth < 700;
                 final buttonWidth = isNarrow ? double.infinity : 360.0;
                 final spacing = isNarrow ? 12.0 : 16.0;
 
@@ -155,6 +153,28 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       spacing: spacing,
                       runSpacing: spacing,
                       children: [
+                        _AdminActionButton(
+                          width: buttonWidth,
+                          icon: Icons.confirmation_number_outlined,
+                          title: 'Startnummern-Vergabe',
+                          subtitle: 'Nummern vergeben/ändern (Läufer)',
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const StartNumberManagerPage()),
+                            );
+                          },
+                        ),
+                        _AdminActionButton(
+                          width: buttonWidth,
+                          icon: Icons.how_to_vote_outlined,
+                          title: 'Zählerstation',
+                          subtitle: 'Runden zählen (Live)',
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const CountingStationPage()),
+                            );
+                          },
+                        ),
                         _AdminActionButton(
                           width: buttonWidth,
                           icon: Icons.receipt_long,
