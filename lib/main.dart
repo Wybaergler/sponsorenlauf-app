@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-// WICHTIG: AuthGate-Import wird entfernt
-import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
-import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart';
-import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
-import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
-import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
-import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
-import 'package:sponsorenlauf_app/theme/app_theme.dart';
 import 'firebase_options.dart';
-import 'package:sponsorenlauf_app/auth/login_or_register.dart'; // WICHTIGER NEUER IMPORT
+
+import 'auth/auth_gate.dart';
+import 'theme/app_theme.dart';
+
+import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
+import 'package:sponsorenlauf_app/auth/login_or_register.dart';
+import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
+import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
+import 'package:sponsorenlauf_app/admin/admin_dashboard_page.dart';
+import 'package:sponsorenlauf_app/pages/sponsoring_page.dart';
+import 'package:sponsorenlauf_app/navigation/route_arguments.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,11 +31,11 @@ class MyApp extends StatelessWidget {
       title: 'Sponsorenlauf App',
       theme: AppTheme.theme,
 
-      // Die Routenkarte wird vereinfacht
-      initialRoute: PublicLandingPage.routeName,
+      // AuthGate entscheidet: eingeloggt -> RunnerDashboard, sonst -> PublicLanding
+      home: const AuthGate(),
+
       routes: {
-        PublicLandingPage.routeName: (context) => const PublicLandingPage(),
-        LoginOrRegister.routeName: (context) => const LoginOrRegister(), // NEUE ROUTE
+        LoginOrRegister.routeName: (context) => const LoginOrRegister(),
         RunnerDashboardPage.routeName: (context) => const RunnerDashboardPage(),
         EditProfilePage.routeName: (context) => const EditProfilePage(),
         AdminDashboardPage.routeName: (context) => const AdminDashboardPage(),
@@ -43,12 +45,10 @@ class MyApp extends StatelessWidget {
         if (settings.name == SponsoringPage.routeName) {
           final args = settings.arguments as SponsoringPageArguments;
           return MaterialPageRoute(
-            builder: (context) {
-              return SponsoringPage(
-                runnerId: args.runnerId,
-                sponsorshipId: args.sponsorshipId,
-              );
-            },
+            builder: (context) => SponsoringPage(
+              runnerId: args.runnerId,
+              sponsorshipId: args.sponsorshipId,
+            ),
           );
         }
         assert(false, 'Need to implement ${settings.name}');
