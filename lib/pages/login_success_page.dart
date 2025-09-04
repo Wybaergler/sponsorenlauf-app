@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
 
 class LoginSuccessPage extends StatefulWidget {
   const LoginSuccessPage({super.key});
@@ -15,12 +16,14 @@ class _LoginSuccessPageState extends State<LoginSuccessPage> {
   }
 
   Future<void> _autoNavigate() async {
-    // kurze Erfolgspause
     await Future.delayed(const Duration(seconds: 2));
-    // WICHTIG: context erst NACH dem await verwenden
     if (!mounted) return;
-    // Zur Startseite/ersten Route zurück
-    Navigator.of(context).popUntil((route) => route.isFirst);
+
+    // Stack vollständig leeren und direkt ins Dashboard
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const RunnerDashboardPage()),
+          (route) => false,
+    );
   }
 
   @override
@@ -32,23 +35,12 @@ class _LoginSuccessPageState extends State<LoginSuccessPage> {
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.check_circle, size: 72),
-              const SizedBox(height: 16),
-              const Text(
-                'Du bist eingeloggt.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 18),
-              ),
-              const SizedBox(height: 24),
-              const CircularProgressIndicator(),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-                child: const Text('Weiter'),
-              ),
+            children: const [
+              Icon(Icons.check_circle, size: 72),
+              SizedBox(height: 16),
+              Text('Du bist eingeloggt.', textAlign: TextAlign.center, style: TextStyle(fontSize: 18)),
+              SizedBox(height: 24),
+              CircularProgressIndicator(),
             ],
           ),
         ),
