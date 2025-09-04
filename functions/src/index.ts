@@ -1,4 +1,4 @@
-import {onDocumentCreated} from "firebase-functions/v2/firestore";
+import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {setGlobalOptions} from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
@@ -26,62 +26,168 @@ async function getLapCounts(): Promise<Map<string, number>> {
 }
 
 /**
- * Löst die finale Berechnung der Spendenbeträge aus.
- * Wird getriggert, wenn ein neues Dokument in der 'abrechnungen'-Sammlung
- * erstellt wird.
+ * Berechnet die finalen Spendenbeträge für alle Sponsoren.
  */
-export const triggerFinalAmountCalculation = onDocumentCreated(
-    "abrechnungen/{docId}",
-    async (event) => {
-      const snapshot = event.data;
-      if (!snapshot) {
-        logger.log("Keine Daten beim Trigger-Event, Abbruch.");
-        return;
+export const calculateFinalAmounts = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError(
+        "unauthenticated",
+        "Benutzer ist nicht authentifiziert.",
+    );
+  }
+
+  const userDoc = await admin.firestore().collection("Laufer").doc(uid).get();
+  const userData = userDoc.data();
+
+  if (userData?.role !== "admin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Diese Aktion erfordert Administrator-Rechte.",
+    );
+  }
+
+  try {
+    const lapCounts = await getLapCounts();
+    const sponsorshipsRef = admin.firestore().collection("Spenden");
+    const sponsorshipsSnapshot = await sponsorshipsRef.get();
+
+    const batch = admin.firestore().batch();
+    let count = 0;
+
+    sponsorshipsSnapshot.forEach((doc) => {
+      const sponsorship = doc.data();
+      if (sponsorship.runnerId) {
+        const runnerId = sponsorship.runnerId;
+        const lapCount = lapCounts.get(runnerId) ?? 0;
+        let finalAmount = 0;
+
+        if (sponsorship.sponsoringType === "fixed") {
+          finalAmount = sponsorship.amount;
+        } else if (sponsorship.sponsoringType === "perLap") {
+          finalAmount = sponsorship.amount * lapCount;
+        }
+
+        batch.update(doc.ref, {finalerBetrag: finalAmount});
+        count++;
       }
-      const data = snapshot.data();
-      const adminUid = data.triggeredBy;
+    });
 
-      logger.log(`Abrechnung gestartet durch Admin: ${adminUid}`);
+    await batch.commit();
 
-      try {
-        const lapCounts = await getLapCounts();
-        const sponsorshipsRef = admin.firestore().collection("Spenden");
-        const sponsorshipsSnapshot = await sponsorshipsRef.get();
+    return {
+      success: true,
+      message: `${count} Spenden erfolgreich berechnet.`,
+    };
+  } catch (error) {
+    logger.error("Fehler bei der Berechnung der Endbeträge:", error);
+    throw new HttpsError(
+        "internal",
+        "Ein interner Fehler ist aufgetreten.",
+        error,
+    );
+  }
+});
 
-        const batch = admin.firestore().batch();
-        let count = 0;
+/**
+ * Versendet die finalen Rechnungs-E-Mails an alle Sponsoren.
+ */
+export const sendBillingEmails = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError(
+        "unauthenticated",
+        "Benutzer ist nicht authentifiziert.",
+    );
+  }
+  const userDoc = await admin.firestore().collection("Laufer").doc(uid).get();
+  if (userDoc.data()?.role !== "admin") {
+    throw new HttpsError(
+        "permission-denied",
+        "Aktion erfordert Admin-Rechte.",
+    );
+  }
 
-        sponsorshipsSnapshot.forEach((doc) => {
-          const sponsorship = doc.data();
-          if (sponsorship.runnerId) {
-            const runnerId = sponsorship.runnerId;
-            const lapCount = lapCounts.get(runnerId) ?? 0;
-            let finalAmount = 0;
+  try {
+    const sponsorshipsSnapshot = await admin.firestore().collection("Spenden").get();
+    const runnersSnapshot = await admin.firestore().collection("Laufer").get();
 
-            if (sponsorship.sponsoringType === "fixed") {
-              finalAmount = sponsorship.amount;
-            } else if (sponsorship.sponsoringType === "perLap") {
-              finalAmount = sponsorship.amount * lapCount;
-            }
+    const runnersMap = new Map<string, any>();
+    runnersSnapshot.forEach((doc) => runnersMap.set(doc.id, doc.data()));
 
-            batch.update(doc.ref, {finalerBetrag: finalAmount});
-            count++;
-          }
-        });
+    const emailsToSend = new Map<string, any[]>();
 
-        await batch.commit();
-
-        logger.log(`${count} Spenden erfolgreich berechnet.`);
-        await snapshot.ref.update({
-          status: "erfolgreich",
-          anzahlSpenden: count,
-        });
-      } catch (error) {
-        logger.error("Fehler bei der Berechnung der Endbeträge:", error);
-        await snapshot.ref.update({
-          status: "fehler",
-          fehlerMeldung: String(error),
-        });
+    sponsorshipsSnapshot.forEach((doc) => {
+      const sponsorship = doc.data();
+      const email = sponsorship.sponsorEmail;
+      if (email && sponsorship.finalerBetrag != null) { // Nur Spenden mit Betrag berücksichtigen
+        if (!emailsToSend.has(email)) {
+          emailsToSend.set(email, []);
+        }
+        emailsToSend.get(email)?.push(sponsorship);
       }
-    },
-);
+    });
+
+    let emailCount = 0;
+    const mailCollection = admin.firestore().collection("mail");
+
+    for (const [email, sponsorships] of emailsToSend.entries()) {
+      let totalAmount = 0;
+      let detailsHtml = "<ul>";
+      const sponsorName = sponsorships[0]?.sponsorName ?? "Sponsor";
+
+      for (const sponsorship of sponsorships) {
+        const runner = runnersMap.get(sponsorship.runnerId);
+        const runnerName = runner?.name ?? "einem Läufer";
+        const finalAmount = sponsorship.finalerBetrag ?? 0;
+        totalAmount += finalAmount;
+
+        let zusageText = "";
+        if (sponsorship.sponsoringType === "fixed") {
+          zusageText = `Fixbetrag: CHF ${sponsorship.amount.toFixed(2)}`;
+        } else {
+          zusageText = `${runner.rundenAnzahl ?? 0} Runden à CHF ${sponsorship.amount.toFixed(2)}`;
+        }
+
+        detailsHtml += `<li>Für <b>${runnerName}</b> (${zusageText}): <b>CHF ${finalAmount.toFixed(2)}</b></li>`;
+      }
+      detailsHtml += "</ul>";
+
+      const emailContent = {
+        to: [email],
+        message: {
+          subject: "Ihr Sponsorenbeitrag für den EVP Sponsorenlauf",
+          html: `
+            <p>Liebe/r ${sponsorName},</p>
+            <p>herzlichen Dank für Ihre grossartige Unterstützung unseres Sponsorenlaufs!</p>
+            <p>Anbei finden Sie die Zusammenfassung der Leistungen der von Ihnen unterstützten Läuferinnen und Läufer und den daraus resultierenden Gesamtbetrag Ihrer Spende.</p>
+            <hr>
+            ${detailsHtml}
+            <hr>
+            <h3>Total Sponsorenbeitrag: CHF ${totalAmount.toFixed(2)}</h3>
+            <p>Wir bitten Sie, diesen Gesamtbetrag auf das folgende Konto zu überweisen:</p>
+            <p>
+              <b>Kontoinhaber:</b> [Ihr Kontoinhaber]<br>
+              <b>IBAN:</b> [Ihre IBAN]<br>
+              <b>Bank:</b> [Ihre Bank]<br>
+              <b>Zahlungszweck:</b> Sponsorenlauf ${sponsorName}
+            </p>
+            <p>Nochmals herzlichen Dank für Ihr wertvolles Engagement!</p>
+            <p>Mit freundlichen Grüssen,<br>Ihr Sponsorenlauf-Team der EVP</p>
+          `,
+        },
+      };
+
+      await mailCollection.add(emailContent);
+      emailCount++;
+    }
+
+    return {
+      success: true,
+      message: `${emailCount} Rechnungs-E-Mails wurden erfolgreich versendet.`,
+    };
+  } catch (error) {
+    logger.error("Fehler beim Versenden der Rechnungs-E-Mails:", error);
+    throw new HttpsError("internal", "Ein Fehler ist aufgetreten.", error);
+  }
+});
