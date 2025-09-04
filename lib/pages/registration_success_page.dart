@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
 
 class RegistrationSuccessPage extends StatefulWidget {
   const RegistrationSuccessPage({super.key});
@@ -17,7 +18,12 @@ class _RegistrationSuccessPageState extends State<RegistrationSuccessPage> {
   Future<void> _autoNavigate() async {
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
-    Navigator.of(context).popUntil((route) => route.isFirst);
+
+    // Nach erfolgreicher Registrierung: direkt ins Dashboard und Stack leeren
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const RunnerDashboardPage()),
+          (route) => false,
+    );
   }
 
   @override
@@ -29,23 +35,16 @@ class _RegistrationSuccessPageState extends State<RegistrationSuccessPage> {
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.check_circle, size: 72),
-              const SizedBox(height: 16),
-              const Text(
+            children: const [
+              Icon(Icons.check_circle, size: 72),
+              SizedBox(height: 16),
+              Text(
                 'Dein Konto wurde angelegt.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 18),
               ),
-              const SizedBox(height: 24),
-              const CircularProgressIndicator(),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-                child: const Text('Weiter'),
-              ),
+              SizedBox(height: 24),
+              CircularProgressIndicator(),
             ],
           ),
         ),
