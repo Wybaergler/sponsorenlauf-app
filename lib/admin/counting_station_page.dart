@@ -1,7 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
 class CountingStationPage extends StatefulWidget {
   const CountingStationPage({super.key});
@@ -11,254 +9,304 @@ class CountingStationPage extends StatefulWidget {
 }
 
 class _CountingStationPageState extends State<CountingStationPage> {
+  final TextEditingController _startCtrl = TextEditingController();
+  final FocusNode _startFocus = FocusNode();
   String? _stationName;
-  final _startNumberController = TextEditingController();
-  final FocusNode _startNumberFocusNode = FocusNode();
+  bool _busy = false;
+  String? _lastMessage;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showSetupDialog());
-  }
-  
-  @override
   void dispose() {
-    _startNumberController.dispose();
-    _startNumberFocusNode.dispose();
+    _startCtrl.dispose();
+    _startFocus.dispose();
     super.dispose();
   }
 
-  Future<void> _showSetupDialog() async {
-    final nameController = TextEditingController();
-    final result = await showDialog<String>(
+  Future<void> _ensureStationName() async {
+    if (_stationName != null && _stationName!.trim().isNotEmpty) return;
+    final ctrl = TextEditingController(text: _stationName ?? '');
+    final name = await showDialog<String?>(
       context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Setup Zähl-Station'),
-          content: TextField(
-            controller: nameController,
-            decoration: const InputDecoration(labelText: "Ihr Name / Stationsname"),
-            autofocus: true,
-            onSubmitted: (_) {
-              if (nameController.text.trim().isNotEmpty) {
-                Navigator.of(context).pop(nameController.text.trim());
-              }
-            },
+      builder: (ctx) => AlertDialog(
+        title: const Text('Zählerstation benennen'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Stationsname (z. B. „Tor A“)',
+            border: OutlineInputBorder(),
           ),
-          actions: <Widget>[
-            ElevatedButton(
-              child: const Text('Starten'),
-              onPressed: () {
-                if (nameController.text.trim().isNotEmpty) {
-                  Navigator.of(context).pop(nameController.text.trim());
-                }
-              },
-            ),
-          ],
-        );
-      },
-    );
-
-    if (result != null && result.isNotEmpty) {
-      setState(() {
-        _stationName = result;
-      });
-    } else {
-      if (mounted) Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _findAndAddLap() async {
-    if (_stationName == null) return;
-    final numberString = _startNumberController.text.trim();
-    if (numberString.isEmpty) return;
-    
-    final number = int.tryParse(numberString);
-    if (number == null) return;
-
-    try {
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('Laufer')
-          .where('startNumber', isEqualTo: number)
-          .limit(1)
-          .get();
-
-      if (querySnapshot.docs.isNotEmpty) {
-        final runnerDoc = querySnapshot.docs.first;
-        final runnerData = runnerDoc.data();
-
-        final lapData = {
-          'runnerId': runnerDoc.id,
-          'runnerName': runnerData['name'] ?? 'Unbekannt',
-          'startNumber': runnerData['startNumber'],
-          'runnerImageUrl': runnerData['profileImageUrl'] ?? '',
-          'stationName': _stationName,
-          'createdAt': FieldValue.serverTimestamp(),
-        };
-        await FirebaseFirestore.instance.collection('Runden').add(lapData);
-
-        _startNumberController.clear();
-        _startNumberFocusNode.requestFocus();
-
-      } else {
-        _showErrorDialog("Kein Läufer mit der Startnummer $numberString gefunden.");
-      }
-    } catch (e) {
-      _showErrorDialog("Ein Fehler ist aufgetreten: $e");
-    }
-  }
-
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Fehler"),
-        content: Text(message),
+        ),
         actions: [
-          ElevatedButton(
-            autofocus: true,
-            onPressed: () {
-              Navigator.pop(context);
-              _startNumberController.clear();
-              _startNumberFocusNode.requestFocus();
-            },
-            child: const Text("OK"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Abbrechen')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('OK')),
         ],
       ),
     );
+    if (name != null && name.isNotEmpty) {
+      setState(() => _stationName = name);
+    }
+  }
+
+  Future<void> _submitStartNumber() async {
+    if (_busy) return;
+    final raw = _startCtrl.text.trim();
+    if (raw.isEmpty) return;
+
+    final startNumber = int.tryParse(raw);
+    if (startNumber == null) {
+      _toast('Bitte eine gültige Startnummer eingeben.');
+      _startCtrl.clear();
+      _requestFocus();
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      // 1) Runner via Startnummer finden
+      final q = await FirebaseFirestore.instance
+          .collection('Laufer')
+          .where('startNumber', isEqualTo: startNumber)
+          .limit(1)
+          .get();
+
+      if (q.docs.isEmpty) {
+        _toast('Keine Läufer:in mit Startnummer $startNumber gefunden.');
+        return;
+      }
+
+      final runnerDoc = q.docs.first;
+      final runnerId = runnerDoc.id;
+
+      // 2) Runde anlegen
+      await FirebaseFirestore.instance.collection('Runden').add({
+        'runnerId': runnerId,
+        'startNumber': startNumber,
+        'station': _stationName ?? 'unbenannt',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      _toast('Runde gezählt für #$startNumber');
+    } catch (e) {
+      _toast('Fehler beim Zählen: $e');
+    } finally {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      _startCtrl.clear();
+      _requestFocus();
+    }
+  }
+
+  void _requestFocus() {
+    // sanft nach dem Frame, um MouseTracker/Focus-Stress zu vermeiden
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _startFocus.requestFocus();
+    });
+  }
+
+  void _toast(String msg) {
+    setState(() => _lastMessage = msg);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _deleteLap(String lapId) async {
     try {
       await FirebaseFirestore.instance.collection('Runden').doc(lapId).delete();
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Runde storniert."), backgroundColor: Colors.orange, behavior: SnackBarBehavior.floating),
-        );
-      }
+      _toast('Runde entfernt.');
     } catch (e) {
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Fehler beim Stornieren: $e"), behavior: SnackBarBehavior.floating),
-        );
-      }
+      _toast('Löschen fehlgeschlagen: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_stationName == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text("Zähl-Station Setup")),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
+    final title = 'Zählerstation${_stationName == null ? '' : ' – ${_stationName!}'}';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Zähl-Station: $_stationName"),
+        title: Text(title),
+        actions: [
+          IconButton(
+            tooltip: 'Station benennen',
+            onPressed: _ensureStationName,
+            icon: const Icon(Icons.edit_location_alt),
+          ),
+          IconButton(
+            tooltip: 'Neu laden',
+            onPressed: () => setState(() {}),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            TextField(
-              controller: _startNumberController,
-              focusNode: _startNumberFocusNode,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 64, fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(hintText: '#'),
-              onSubmitted: (_) => _findAndAddLap(),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _findAndAddLap,
-                icon: const Icon(Icons.add),
-                label: const Text("+1 Runde erfassen"),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ),
-            const Divider(height: 40),
-            
-            // ================================================================
-            // HIER SIND DIE FINALEN ÄNDERUNGEN
-            // ================================================================
-            const Text("Alle Erfassungen:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                // Die Abfrage hat jetzt KEIN .limit(3) mehr
-                stream: FirebaseFirestore.instance
-                    .collection('Runden')
-                    .where('stationName', isEqualTo: _stationName)
-                    .orderBy('createdAt', descending: true)
-                    .snapshots(),
-                builder: (context, lapSnapshot) {
-                  if (lapSnapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (!lapSnapshot.hasData || lapSnapshot.data!.docs.isEmpty) {
-                    return const Center(child: Text("Noch keine Runden erfasst."));
-                  }
-                  final allLaps = lapSnapshot.data!.docs;
-                  return ListView.builder(
-                    itemCount: allLaps.length,
-                    itemBuilder: (context, index) {
-                      final lap = allLaps[index];
-                      final lapData = lap.data() as Map<String, dynamic>;
-                      final imageUrl = lapData['runnerImageUrl'] ?? '';
-                      final runnerName = lapData['runnerName'] ?? 'Unbekannt';
-                      final startNumber = lapData['startNumber'] ?? '-';
-                      String formattedTime = '...';
-                      if (lapData['createdAt'] != null) {
-                        final timestamp = (lapData['createdAt'] as Timestamp).toDate();
-                        formattedTime = DateFormat('HH:mm:ss').format(timestamp);
-                      }
-                      return Card(
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.grey[200],
-                            backgroundImage: imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
-                            child: imageUrl.isEmpty ? const Icon(Icons.person) : null,
-                          ),
-                          // Neues Layout für den Titel
-                          title: RichText(
-                            text: TextSpan(
-                              style: DefaultTextStyle.of(context).style,
-                              children: <TextSpan>[
-                                TextSpan(text: '#$startNumber ', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                TextSpan(text: runnerName),
-                              ],
-                            ),
-                          ),
-                          subtitle: Text("Erfasst um: $formattedTime"),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
-                            onPressed: () => _deleteLap(lap.id),
-                          ),
+      body: LayoutBuilder(
+        builder: (context, c) {
+          final narrow = c.maxWidth < 720;
+
+          return Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                // Eingabezeile
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _startCtrl,
+                        focusNode: _startFocus,
+                        keyboardType: TextInputType.number,
+                        onSubmitted: (_) => _submitStartNumber(),
+                        decoration: const InputDecoration(
+                          labelText: 'Startnummer eingeben',
+                          border: OutlineInputBorder(),
                         ),
-                      );
-                    },
-                  );
-                },
-              ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: _busy ? null : _submitStartNumber,
+                        icon: _busy
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.add),
+                        label: const Text('Zählen'),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+                if (_lastMessage != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(_lastMessage!, style: const TextStyle(color: Colors.black54)),
+                  ),
+
+                const SizedBox(height: 12),
+
+                // Letzte Runden (Stream)
+                Expanded(
+                  child: _RecentLapsList(
+                    narrow: narrow,
+                    onDelete: _deleteLap,
+                  ),
+                ),
+              ],
             ),
-            // Der "Alle anzeigen"-Button wurde entfernt
-          ],
-        ),
+          );
+        },
       ),
     );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Beim ersten Build Fokus setzen
+    _requestFocus();
+  }
+}
+
+class _RecentLapsList extends StatelessWidget {
+  final bool narrow;
+  final void Function(String lapId) onDelete;
+
+  const _RecentLapsList({required this.narrow, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final query = FirebaseFirestore.instance
+        .collection('Runden')
+        .orderBy('createdAt', descending: true)
+        .limit(40);
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: query.snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Center(child: Text('Fehler: ${snap.error}'));
+        }
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snap.data!.docs;
+
+        if (docs.isEmpty) {
+          return const Center(child: Text('Noch keine gezählten Runden.'));
+        }
+
+        if (narrow) {
+          return ListView.separated(
+            itemCount: docs.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) {
+              final d = docs[i];
+              final m = d.data();
+              final sn = (m['startNumber'] ?? '').toString();
+              final station = (m['station'] ?? '').toString();
+              final ts = (m['createdAt'] is Timestamp)
+                  ? (m['createdAt'] as Timestamp).toDate().toLocal().toString()
+                  : '—';
+              return ListTile(
+                leading: CircleAvatar(child: Text(sn.isEmpty ? '—' : sn)),
+                title: Text('Station: ${station.isEmpty ? '—' : station}'),
+                subtitle: Text(ts),
+                trailing: IconButton(
+                  tooltip: 'Löschen',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => onDelete(d.id),
+                ),
+              );
+            },
+          );
+        }
+
+        // Breite Ansicht als Tabelle
+        return SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: DataTable(
+            columns: const [
+              DataColumn(label: Text('#')),
+              DataColumn(label: Text('Startnummer')),
+              DataColumn(label: Text('RunnerId')),
+              DataColumn(label: Text('Station')),
+              DataColumn(label: Text('Zeit')),
+              DataColumn(label: Text('Aktion')),
+            ],
+            rows: [
+              for (int i = 0; i < docs.length; i++)
+                _toRow(context, i, docs[i]),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  DataRow _toRow(BuildContext context, int i, QueryDocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data();
+    final sn = (m['startNumber'] ?? '').toString();
+    final runnerId = (m['runnerId'] ?? '').toString();
+    final station = (m['station'] ?? '').toString();
+    final time = (m['createdAt'] is Timestamp)
+        ? (m['createdAt'] as Timestamp).toDate().toLocal()
+        : null;
+
+    return DataRow(cells: [
+      DataCell(Text('${i + 1}')),
+      DataCell(Text(sn.isEmpty ? '—' : sn)),
+      DataCell(SelectableText(runnerId.isEmpty ? '—' : runnerId)),
+      DataCell(Text(station.isEmpty ? '—' : station)),
+      DataCell(Text(time == null ? '—' : time.toString())),
+      DataCell(
+        IconButton(
+          tooltip: 'Löschen',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: () => onDelete(d.id),
+        ),
+      ),
+    ]);
   }
 }
