@@ -1,0 +1,25 @@
+// Firestore Security Rules – MVP-sicher
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Standard: Nur angemeldete Nutzer dürfen lesen/schreiben
+    match /{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Spezieller Schutz: jeder User nur sein eigenes Profil
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update, delete: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
