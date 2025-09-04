@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sponsorenlauf_app/pages/edit_profile_page.dart';
+import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
 
 class RegistrationSuccessPage extends StatelessWidget {
   const RegistrationSuccessPage({super.key});
@@ -25,10 +26,16 @@ class RegistrationSuccessPage extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: () {
-                  // Erfolgsseite verlassen und direkt zur Profilbearbeitung
-                  Navigator.of(context).pushAndRemoveUntil(
+                onPressed: () async {
+                  // 1) Erst zur Profilbearbeitung (OHNE Stack zu leeren)
+                  await Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const EditProfilePage()),
+                  );
+                  if (!context.mounted) return;
+
+                  // 2) Nach Rückkehr (z. B. nach Speichern/Pop) sicher ins Dashboard
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const RunnerDashboardPage()),
                         (route) => false,
                   );
                 },
