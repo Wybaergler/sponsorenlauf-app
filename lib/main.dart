@@ -37,6 +37,7 @@ class MyApp extends StatelessWidget {
       routes: {
         LoginOrRegister.routeName: (context) => const LoginOrRegister(),
         RunnerDashboardPage.routeName: (context) => const RunnerDashboardPage(),
+        '/public': (context) => const PublicLandingPage(),
         EditProfilePage.routeName: (context) => const EditProfilePage(),
         AdminDashboardPage.routeName: (context) => const AdminDashboardPage(),
       },
