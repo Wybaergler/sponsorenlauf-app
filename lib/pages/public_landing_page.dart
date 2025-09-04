@@ -7,7 +7,7 @@ import 'package:sponsorenlauf_app/pages/leaderboard_page.dart';
 import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
 
 class PublicLandingPage extends StatefulWidget {
-  static const routeName = '/';
+  static const routeName = '/public';
   const PublicLandingPage({super.key});
 
   @override
