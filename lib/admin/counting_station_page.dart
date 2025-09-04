@@ -9,8 +9,8 @@ class CountingStationPage extends StatefulWidget {
 }
 
 class _CountingStationPageState extends State<CountingStationPage> {
-  final TextEditingController _stationCtrl = TextEditingController();
-  final TextEditingController _startCtrl = TextEditingController();
+  final _stationCtrl = TextEditingController();
+  final _startCtrl = TextEditingController();
 
   bool _busy = false;
   String _status = '';
@@ -26,7 +26,6 @@ class _CountingStationPageState extends State<CountingStationPage> {
     if (_busy) return;
     final station = _stationCtrl.text.trim();
     final raw = _startCtrl.text.trim();
-
     if (raw.isEmpty) {
       setState(() => _status = 'Bitte Startnummer eingeben.');
       return;
@@ -83,128 +82,62 @@ class _CountingStationPageState extends State<CountingStationPage> {
 
   @override
   Widget build(BuildContext context) {
+    // SAFE MODE: zentriert, feste Breite, keine Streams/Overlays
     return Scaffold(
-      appBar: AppBar(title: const Text('Zählerstation')),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            // Stationsname (kein Dialog → stabiler)
-            Row(
+      appBar: AppBar(title: const Text('Zählerstation (Safe Mode)')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min, // wichtig: keine unendliche Höhe
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _stationCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Stationsname (optional)',
-                      border: OutlineInputBorder(),
-                    ),
+                TextField(
+                  controller: _stationCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Stationsname (optional)',
+                    border: OutlineInputBorder(),
                   ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _startCtrl,
+                        keyboardType: TextInputType.number,
+                        onSubmitted: (_) => _countLap(),
+                        decoration: const InputDecoration(
+                          labelText: 'Startnummer',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: _busy ? null : _countLap,
+                        icon: _busy
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.add),
+                        label: const Text('Zählen'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _status,
+                  style: const TextStyle(color: Colors.black54),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-
-            // Zähl-Eingabe
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _startCtrl,
-                    keyboardType: TextInputType.number,
-                    onSubmitted: (_) => _countLap(),
-                    decoration: const InputDecoration(
-                      labelText: 'Startnummer',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: _busy ? null : _countLap,
-                    icon: _busy
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.add),
-                    label: const Text('Zählen'),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                _status,
-                style: const TextStyle(color: Colors.black54),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-            Expanded(child: _RecentLaps()),
-          ],
+          ),
         ),
       ),
-    );
-  }
-}
-
-class _RecentLaps extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final query = FirebaseFirestore.instance
-        .collection('Runden')
-        .orderBy('createdAt', descending: true)
-        .limit(40);
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: query.snapshots(),
-      builder: (context, snap) {
-        if (snap.hasError) {
-          return Center(child: Text('Fehler: ${snap.error}'));
-        }
-        if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final docs = snap.data!.docs;
-        if (docs.isEmpty) {
-          return const Center(child: Text('Noch keine gezählten Runden.'));
-        }
-
-        return ListView.separated(
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (_, i) {
-            final d = docs[i];
-            final m = d.data();
-            final sn = (m['startNumber'] ?? '').toString();
-            final station = (m['station'] ?? '—').toString();
-            final ts = (m['createdAt'] is Timestamp)
-                ? (m['createdAt'] as Timestamp).toDate().toLocal().toString()
-                : '—';
-            final runnerId = (m['runnerId'] ?? '').toString();
-
-            return ListTile(
-              leading: CircleAvatar(child: Text(sn.isEmpty ? '—' : sn)),
-              title: Text('Station: $station'),
-              subtitle: Text('$ts\n$runnerId'),
-              isThreeLine: true,
-              trailing: IconButton(
-                tooltip: 'Löschen',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () async {
-                  try {
-                    await FirebaseFirestore.instance.collection('Runden').doc(d.id).delete();
-                  } catch (_) {}
-                },
-              ),
-            );
-          },
-        );
-      },
     );
   }
 }
