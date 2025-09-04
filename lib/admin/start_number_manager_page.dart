@@ -12,7 +12,6 @@ class StartNumberManagerPage extends StatefulWidget {
 class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
   bool _isAdmin = false;
   bool _checking = true;
-  String? _error;
 
   @override
   void initState() {
@@ -24,7 +23,7 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
     try {
       final u = FirebaseAuth.instance.currentUser;
       if (u == null) {
-        setState(() { _isAdmin = false; _checking = false; _error = 'Nicht angemeldet.'; });
+        setState(() { _isAdmin = false; _checking = false; });
         return;
       }
       final snap = await FirebaseFirestore.instance.collection('Laufer').doc(u.uid).get();
@@ -32,8 +31,8 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
         _isAdmin = snap.data()?['role'] == 'admin';
         _checking = false;
       });
-    } catch (e) {
-      setState(() { _isAdmin = false; _checking = false; _error = e.toString(); });
+    } catch (_) {
+      setState(() { _isAdmin = false; _checking = false; });
     }
   }
 
@@ -64,10 +63,8 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
         ],
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance
-            .collection('Laufer')
-            .orderBy('startNumber', descending: false)
-            .snapshots(),
+        // Wichtig: KEIN orderBy → wir sortieren lokal stabil
+        stream: FirebaseFirestore.instance.collection('Laufer').snapshots(),
         builder: (context, snap) {
           if (snap.hasError) {
             return Center(child: Text('Fehler: ${snap.error}'));
@@ -75,10 +72,27 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final docs = snap.data!.docs;
+
+          final docs = snap.data!.docs.toList();
+
+          // Lokale Sortierung: erst nach startNumber (nulls zuletzt), dann Name/Email
+          docs.sort((a, b) {
+            int? sa = _toIntOrNull(a.data()['startNumber']);
+            int? sb = _toIntOrNull(b.data()['startNumber']);
+            if (sa == null && sb == null) {
+              return _nameOf(a).toLowerCase().compareTo(_nameOf(b).toLowerCase());
+            }
+            if (sa == null) return 1; // null ans Ende
+            if (sb == null) return -1;
+            final cmp = sa.compareTo(sb);
+            if (cmp != 0) return cmp;
+            return _nameOf(a).toLowerCase().compareTo(_nameOf(b).toLowerCase());
+          });
+
           if (docs.isEmpty) {
             return const Center(child: Text('Keine Läufer gefunden.'));
           }
+
           return ListView.separated(
             padding: const EdgeInsets.all(12),
             separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -86,7 +100,7 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
             itemBuilder: (_, i) {
               final d = docs[i];
               final data = d.data();
-              final name = _runnerName(data, d.id);
+              final name = _nameOf(d);
               final sn = (data['startNumber'] ?? '').toString();
               final ctrl = TextEditingController(text: sn);
 
@@ -123,21 +137,19 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
                           int? snum = int.tryParse(val);
                           if (val.isEmpty) snum = null;
                           try {
-                            await FirebaseFirestore.instance.collection('Laufer').doc(d.id).set(
-                              {'startNumber': snum},
-                              SetOptions(merge: true),
+                            await FirebaseFirestore.instance
+                                .collection('Laufer')
+                                .doc(d.id)
+                                .set({'startNumber': snum}, SetOptions(merge: true));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Gespeichert.')),
                             );
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Gespeichert.')),
-                              );
-                            }
                           } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Fehler: $e')),
-                              );
-                            }
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Fehler: $e')),
+                            );
                           }
                         },
                         icon: const Icon(Icons.save),
@@ -154,14 +166,22 @@ class _StartNumberManagerPageState extends State<StartNumberManagerPage> {
     );
   }
 
-  String _runnerName(Map<String, dynamic> d, String fallbackId) {
-    final dn = (d['displayName'] ?? '').toString().trim();
+  static int? _toIntOrNull(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
+  }
+
+  String _nameOf(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+    final data = d.data();
+    String dn = (data['displayName'] ?? '').toString().trim();
     if (dn.isNotEmpty) return dn;
-    final fn = (d['firstName'] ?? d['vorname'] ?? '').toString().trim();
-    final ln = (d['lastName'] ?? d['nachname'] ?? '').toString().trim();
-    final em = (d['email'] ?? '').toString().trim();
+    final fn = (data['firstName'] ?? data['vorname'] ?? '').toString().trim();
+    final ln = (data['lastName'] ?? data['nachname'] ?? '').toString().trim();
     if (fn.isNotEmpty || ln.isNotEmpty) return [fn, ln].where((x) => x.isNotEmpty).join(' ');
+    final em = (data['email'] ?? '').toString().trim();
     if (em.isNotEmpty) return em;
-    return 'Läufer $fallbackId';
+    return 'Läufer ${d.id}';
   }
 }
