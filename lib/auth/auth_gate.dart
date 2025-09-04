@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:sponsorenlauf_app/pages/public_landing_page.dart';
-import 'package:sponsorenlauf_app/pages/runner_dashboard_page.dart';
+import 'package:sponsorenlauf_app/auth/profile_completion_gate.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -16,10 +17,14 @@ class AuthGate extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
+
+        // Eingeloggt -> ProfileCompletionGate entscheidet (EditProfile oder Dashboard)
         if (snapshot.hasData) {
-          return const RunnerDashboardPage(); // eingeloggt
+          return const ProfileCompletionGate();
         }
-        return const PublicLandingPage(); // nicht eingeloggt
+
+        // Nicht eingeloggt -> öffentliche Landing
+        return const PublicLandingPage();
       },
     );
   }
