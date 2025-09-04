@@ -12,13 +12,12 @@ class ProfileCompletionGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      // Sicherheitsnetz: ohne User kein Gate – theoretisch unreachable,
-      // weil AuthGate nur eingeloggte Nutzer hierher lässt.
-      return const _LoadingScreen();
+      return const _LoadingScreen(); // Sicherheitsnetz
     }
 
-    final docRef =
-    FirebaseFirestore.instance.collection('users').doc(user.uid);
+    final docRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid);
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: docRef.snapshots(),
@@ -31,11 +30,6 @@ class ProfileCompletionGate extends StatelessWidget {
         }
 
         final data = snapshot.data?.data();
-
-        // Regel:
-        // - Wenn kein Dokument vorhanden: Nutzer muss Profil ausfüllen.
-        // - Wenn isProfileComplete == true: Dashboard.
-        // - Sonst: Profil bearbeiten.
         final isComplete = (data != null && data['isProfileComplete'] == true);
 
         if (isComplete) {
