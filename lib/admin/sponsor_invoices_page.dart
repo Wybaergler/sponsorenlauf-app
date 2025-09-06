@@ -1,11 +1,16 @@
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Clipboard
 import 'package:intl/intl.dart';
 
 import '../config/billing_config.dart';
 import '../services/email_service.dart';
 
+/// Option 2:
+/// Kompakte Liste der Sponsoren. Tap auf eine Karte öffnet ein Modal (Bottom-Sheet)
+/// mit vollständigen Details (CSV kopieren & E-Mail versenden).
 class SponsorInvoicesPage extends StatefulWidget {
   static const routeName = '/sponsor_invoices';
   const SponsorInvoicesPage({super.key});
@@ -15,13 +20,15 @@ class SponsorInvoicesPage extends StatefulWidget {
 }
 
 class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
-  final _currency =
-  NumberFormat.currency(locale: 'de_CH', symbol: 'CHF', decimalDigits: 2);
+  final _currency = NumberFormat.currency(
+    locale: 'de_CH',
+    symbol: 'CHF',
+    decimalDigits: 2,
+  );
 
   bool _onlyWithEmail = true;
   bool _onlyWithPositiveTotal = true;
   bool _sendingAll = false;
-  bool _debug = false;
 
   String? _status;
   Timer? _statusTimer;
@@ -29,6 +36,7 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
   // Caches
   final Map<String, String> _runnerNameCache = {};
   final Map<String, int> _runnerLapsCache = {};
+  final Map<int, String> _startNoToRunnerId = {}; // startNumber -> runnerId
 
   @override
   void dispose() {
@@ -99,6 +107,7 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     return null;
   }
 
+  // ---------- Läufer-Infos ----------
   Future<String> _runnerName(String runnerId) async {
     if (runnerId.isEmpty) return '';
     if (_runnerNameCache.containsKey(runnerId)) return _runnerNameCache[runnerId]!;
@@ -122,7 +131,25 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     }
   }
 
-  Future<int> _lapsForRunner(String runnerId) async {
+  Future<String> _runnerIdFromStartNo(int startNo) async {
+    if (startNo <= 0) return '';
+    if (_startNoToRunnerId.containsKey(startNo)) return _startNoToRunnerId[startNo]!;
+    try {
+      final q = await FirebaseFirestore.instance
+          .collection('Laufer')
+          .where('startNumber', isEqualTo: startNo)
+          .limit(1)
+          .get();
+      if (q.docs.isNotEmpty) {
+        final id = q.docs.first.id;
+        _startNoToRunnerId[startNo] = id;
+        return id;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  Future<int> _lapsByRunnerId(String runnerId) async {
     if (runnerId.isEmpty) return 0;
 
     final cached = _runnerLapsCache[runnerId];
@@ -137,18 +164,15 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
         _runnerLapsCache[runnerId] = fromDoc;
         return fromDoc;
       }
-    } catch (_) {
-      // ignorieren
-    }
+    } catch (_) {}
 
-    // 2) Fallback: live zählen in Runden (Aggregate-Query; Fallback normales Query)
+    // 2) Fallback: Runden zählen nach runnerId
     try {
       final q = FirebaseFirestore.instance
           .collection('Runden')
           .where('runnerId', isEqualTo: runnerId);
       try {
         final agg = await q.count().get();
-        // agg.count kann int? sein → robust in int wandeln
         final int c = (agg.count is int)
             ? (agg.count as int)
             : int.tryParse('${agg.count}') ?? 0;
@@ -165,6 +189,31 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     }
   }
 
+  Future<int> _lapsByStartNo(int startNo) async {
+    if (startNo <= 0) return 0;
+    final rid = await _runnerIdFromStartNo(startNo);
+    if (rid.isNotEmpty) return _lapsByRunnerId(rid);
+
+    // Fallback: Runden nach startNumber zählen (falls so gespeichert wurde)
+    try {
+      final q = FirebaseFirestore.instance
+          .collection('Runden')
+          .where('startNumber', isEqualTo: startNo);
+      try {
+        final agg = await q.count().get();
+        final int c = (agg.count is int)
+            ? (agg.count as int)
+            : int.tryParse('${agg.count}') ?? 0;
+        return c;
+      } catch (_) {
+        final snap = await q.get();
+        return snap.size;
+      }
+    } catch (_) {
+      return 0;
+    }
+  }
+
   // ---------- Datenaufbereitung: Spenden gruppieren ----------
   Future<List<_SponsorGroup>> _loadGroups() async {
     final qs = await FirebaseFirestore.instance.collection('Spenden').get();
@@ -174,7 +223,7 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     for (final doc in qs.docs) {
       final m = (doc.data()) as Map<String, dynamic>;
 
-      // Sponsor-E-Mail (viele Aliasse unterstützt)
+      // Sponsor-E-Mail (viele Aliasse)
       final email = _firstString(m, [
         'sponsorEmail',
         'sponsor.email',
@@ -192,38 +241,82 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
         'sponsorNameDisplay',
       ]);
 
-      final runnerId = _firstString(m, [
+      // runnerId oder via Startnummer herleitbar
+      String runnerId = _firstString(m, [
         'runnerId',
         'runnerID',
-        'laeuferId',
-        'läuferId',
+        'runnerUid',
+        'uid',
+        'userId',
         'runner.id'
+      ]);
+      final int? startNo = _firstInt(m, [
+        'startNumber',
+        'startnummer',
+        'startNo',
+        'nummer',
       ]);
 
       groups.putIfAbsent(email, () => _SponsorGroup(email: email, sponsorName: sponsorName));
 
-      // Beträge:
-      final num fixed = _firstNum(m, ['fixedAmount', 'betragFix', 'fixed']) ?? 0;
-      final num perLap = _firstNum(m, ['perLapAmount', 'betragProRunde', 'perLap']) ?? 0;
+      // Betragsfelder (viele Aliasse):
+      final num fixed = _firstNum(m, [
+            'fixedAmount',
+            'betragFix',
+            'fixed',
+            'fixedCHF',
+            'betrag_fix',
+            'betragFixCHF',
+            'fix',
+            'fixAmount',
+          ]) ?? 0;
+      final num perLap = _firstNum(m, [
+            'perLapAmount',
+            'betragProRunde',
+            'perLap',
+            'amountPerRound',
+            'amountPerLap',
+            'betrag_pro_runde',
+            'perLapCHF',
+            'proRunde',
+            'pro_runde',
+            'pledgePerLap',
+          ]) ?? 0;
 
-      // Falls Aggregation vorhanden ist, nutzen wir sie direkt
-      final num? aggregated =
-      _firstNum(m, ['currentTotal', 'aggregates.total', 'calc.total']);
+      // Aggregierte Total-Felder (falls vorhanden)
+      final num? aggregated = _firstNum(m, [
+        'currentTotal',
+        'current_total',
+        'aggregates.total',
+        'calc.total',
+        'total',
+        'totalCHF',
+        'amountTotal',
+        'sum',
+      ]);
 
-      num totalForThisDonation;
-      if (aggregated != null && aggregated > 0) {
-        totalForThisDonation = aggregated;
-      } else {
-        int laps = 0;
+      // Läufe ermitteln, falls nötig
+      int laps = 0;
+      if (aggregated == null || aggregated <= 0) {
         if (perLap > 0) {
-          laps = await _lapsForRunner(runnerId);
+          if (runnerId.isEmpty && (startNo ?? 0) > 0) {
+            runnerId = await _runnerIdFromStartNo(startNo!);
+          }
+          if (runnerId.isNotEmpty) {
+            laps = await _lapsByRunnerId(runnerId);
+          } else if ((startNo ?? 0) > 0) {
+            laps = await _lapsByStartNo(startNo!);
+          }
         }
-        totalForThisDonation = fixed + perLap * laps;
       }
+
+      final num totalForThisDonation =
+          (aggregated != null && aggregated > 0) ? aggregated : (fixed + perLap * laps);
 
       groups[email]!.items.add(_SponsorItem(
         donationId: doc.id,
         runnerId: runnerId,
+        startNumber: startNo,
         currentTotal: totalForThisDonation,
         perLap: perLap == 0 ? null : perLap,
         fixed: fixed == 0 ? null : fixed,
@@ -233,7 +326,13 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     // Läufernamen & Summen
     for (final g in groups.values) {
       for (final it in g.items) {
-        it.runnerName = await _runnerName(it.runnerId);
+        if (it.runnerId.isNotEmpty) {
+          it.runnerName = await _runnerName(it.runnerId);
+        } else if ((it.startNumber ?? 0) > 0) {
+          final rid = await _runnerIdFromStartNo(it.startNumber!);
+          it.runnerId = rid;
+          it.runnerName = await _runnerName(rid);
+        }
       }
       g.recalc();
     }
@@ -376,27 +475,20 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
   Widget build(BuildContext context) {
     final bannerTest = BillingConfig.testMode
         ? Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.12),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Text('[TESTMODUS] Mails werden an testRecipient geleitet.',
-          style: TextStyle(color: Colors.deepOrange)),
-    )
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.12),
+              border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text('[TESTMODUS] Mails werden an testRecipient geleitet.',
+                style: TextStyle(color: Colors.deepOrange)),
+          )
         : const SizedBox.shrink();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sponsor-Abrechnung & E-Mail'),
-        actions: [
-          IconButton(
-            tooltip: _debug ? 'Debug aus' : 'Debug an',
-            onPressed: () => setState(() => _debug = !_debug),
-            icon: Icon(_debug ? Icons.bug_report : Icons.bug_report_outlined),
-          ),
-        ],
       ),
       backgroundColor: Colors.grey.shade100,
       body: FutureBuilder<List<_SponsorGroup>>(
@@ -439,9 +531,9 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
                         onPressed: _sendingAll
                             ? null
                             : () async {
-                          final g = await _loadGroups();
-                          await _sendAll(g);
-                        },
+                                final g = await _loadGroups();
+                                await _sendAll(g);
+                              },
                         icon: const Icon(Icons.send),
                         label: Text(_sendingAll ? 'Senden…' : 'Alle senden (gefiltert)'),
                       ),
@@ -456,15 +548,7 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
 
                   if (groups.isEmpty)
                     const Text('Keine Daten für die aktuellen Filter.'),
-                  for (final g in groups) _groupCard(g),
-
-                  if (_debug) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Debug: Diese Seite akzeptiert unterschiedliche Feldnamen in "Spenden".',
-                      style: TextStyle(color: Colors.black54),
-                    ),
-                  ],
+                  for (final g in groups) _groupCard(context, g),
                 ],
               ),
             ),
@@ -474,7 +558,11 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     );
   }
 
-  Widget _groupCard(_SponsorGroup g) {
+  Widget _groupCard(BuildContext context, _SponsorGroup g) {
+    // maximal 2 Vorschau-Zeilen
+    final preview = g.items.take(2).toList();
+    final more = g.items.length - preview.length;
+
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
@@ -482,121 +570,248 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: Colors.grey.shade300),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            // Header
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        g.sponsorName.isNotEmpty ? g.sponsorName : g.email,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                      ),
-                      if (g.sponsorName.isNotEmpty)
-                        Text(g.email, style: const TextStyle(color: Colors.black54)),
-                    ],
-                  ),
-                ),
-                Text(_currency.format(g.total),
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
-
-            // Tabelle
-            Table(
-              columnWidths: const {
-                0: FlexColumnWidth(2),
-                1: FlexColumnWidth(2),
-                2: IntrinsicColumnWidth(),
-              },
-              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-              children: [
-                const TableRow(
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Text('Läufer', style: TextStyle(fontWeight: FontWeight.w600)),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Text('Details', style: TextStyle(fontWeight: FontWeight.w600)),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Text('Betrag', style: TextStyle(fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-                  ],
-                ),
-                for (final it in g.items)
-                  TableRow(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(it.runnerName),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text(_lineDetail(it),
-                            style: const TextStyle(color: Colors.black54)),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(_currency.format(it.currentTotal)),
+      child: InkWell(
+        onTap: () => _openDetailSheet(context, g),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              // Header
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          g.sponsorName.isNotEmpty ? g.sponsorName : g.email,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                         ),
-                      ),
-                    ],
+                        if (g.sponsorName.isNotEmpty)
+                          Text(g.email, style: const TextStyle(color: Colors.black54)),
+                      ],
+                    ),
                   ),
-                TableRow(
-                  children: [
-                    const SizedBox(),
-                    const Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Text('Total',
-                            style: TextStyle(fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          _currency.format(g.total),
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton.icon(
-                onPressed: () => _sendOne(g),
-                icon: const Icon(Icons.email_outlined),
-                label: const Text('E-Mail an Sponsor'),
+                  Text(_currency.format(g.total),
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.expand_more),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+
+              // Kurzvorschau
+              Column(
+                children: [
+                  for (final it in preview)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(it.runnerName.isEmpty ? '(ohne Name)' : it.runnerName)),
+                          Expanded(child: Text(_lineDetail(it), style: const TextStyle(color: Colors.black54))),
+                          Text(_currency.format(it.currentTotal)),
+                        ],
+                      ),
+                    ),
+                  if (more > 0)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('…und $more weitere',
+                          style: const TextStyle(color: Colors.black54)),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton.icon(
+                  onPressed: () => _sendOne(g),
+                  icon: const Icon(Icons.email_outlined),
+                  label: const Text('E-Mail an Sponsor'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _openDetailSheet(BuildContext context, _SponsorGroup g) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final rows = g.items
+            .map((it) => [
+                  it.runnerName,
+                  _lineDetail(it),
+                  _currency.format(it.currentTotal),
+                ])
+            .toList();
+
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.75,
+          minChildSize: 0.4,
+          maxChildSize: 0.93,
+          builder: (_, controller) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
+                child: ListView(
+                  controller: controller,
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                g.sponsorName.isNotEmpty ? g.sponsorName : g.email,
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                              ),
+                              if (g.sponsorName.isNotEmpty)
+                                Text(g.email, style: const TextStyle(color: Colors.black54)),
+                            ],
+                          ),
+                        ),
+                        Text(_currency.format(g.total),
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            final csv = _toCsv(rows, header: ['Läufer', 'Details', 'Betrag (CHF)']);
+                            await Clipboard.setData(ClipboardData(text: csv));
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('CSV in die Zwischenablage kopiert.')),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.copy_all),
+                          label: const Text('CSV kopieren'),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => _sendOne(g),
+                          icon: const Icon(Icons.email_outlined),
+                          label: const Text('E-Mail an Sponsor'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Divider(),
+
+                    Table(
+                      columnWidths: const {
+                        0: FlexColumnWidth(2),
+                        1: FlexColumnWidth(2),
+                        2: IntrinsicColumnWidth(),
+                      },
+                      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                      children: [
+                        const TableRow(
+                          children: [
+                            Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Text('Läufer', style: TextStyle(fontWeight: FontWeight.w600)),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Text('Details', style: TextStyle(fontWeight: FontWeight.w600)),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text('Betrag', style: TextStyle(fontWeight: FontWeight.w600)),
+                              ),
+                            ),
+                          ],
+                        ),
+                        for (final it in g.items)
+                          TableRow(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(it.runnerName),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(_lineDetail(it), style: const TextStyle(color: Colors.black54)),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(_currency.format(it.currentTotal)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        TableRow(
+                          children: [
+                            const SizedBox(),
+                            const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text('Total', style: TextStyle(fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  _currency.format(g.total),
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _toCsv(List<List<String>> rows, {List<String>? header}) {
+    final buf = StringBuffer();
+    if (header != null) buf.writeln(header.map(_csvCell).join(';'));
+    for (final r in rows) {
+      buf.writeln(r.map(_csvCell).join(';'));
+    }
+    return buf.toString();
+  }
+
+  String _csvCell(String s) {
+    final needQuote = s.contains(';') || s.contains('"') || s.contains('\n');
+    var t = s.replaceAll('"', '""');
+    if (needQuote) t = '"$t"';
+    return t;
   }
 }
 
@@ -605,8 +820,7 @@ class _BoolChip extends StatelessWidget {
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const _BoolChip(
-      {required this.label, required this.value, required this.onChanged});
+  const _BoolChip({required this.label, required this.value, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -621,7 +835,8 @@ class _BoolChip extends StatelessWidget {
 // ---------- Modelle ----------
 class _SponsorItem {
   final String donationId;
-  final String runnerId;
+  String runnerId;
+  final int? startNumber;
   final num currentTotal;
   final num? perLap;
   final num? fixed;
@@ -630,6 +845,7 @@ class _SponsorItem {
   _SponsorItem({
     required this.donationId,
     required this.runnerId,
+    required this.startNumber,
     required this.currentTotal,
     this.perLap,
     this.fixed,
