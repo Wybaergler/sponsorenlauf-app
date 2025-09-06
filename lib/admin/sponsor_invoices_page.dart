@@ -15,16 +15,20 @@ class SponsorInvoicesPage extends StatefulWidget {
 }
 
 class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
-  final _currency = NumberFormat.currency(locale: 'de_CH', symbol: 'CHF', decimalDigits: 2);
+  final _currency =
+  NumberFormat.currency(locale: 'de_CH', symbol: 'CHF', decimalDigits: 2);
 
   bool _onlyWithEmail = true;
   bool _onlyWithPositiveTotal = true;
   bool _sendingAll = false;
+  bool _debug = false;
+
   String? _status;
   Timer? _statusTimer;
 
-  // Läufernamen-Cache
+  // Caches
   final Map<String, String> _runnerNameCache = {};
+  final Map<String, int> _runnerLapsCache = {};
 
   @override
   void dispose() {
@@ -41,20 +45,75 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     });
   }
 
+  // ---------- Feld-Helper (unterstützt verschachtelte Keys) ----------
+  dynamic _getAtPath(Map<String, dynamic> m, String path) {
+    dynamic cur = m;
+    for (final part in path.split('.')) {
+      if (cur is Map<String, dynamic> && cur.containsKey(part)) {
+        cur = cur[part];
+      } else {
+        return null;
+      }
+    }
+    return cur;
+  }
+
+  String _firstString(Map<String, dynamic> m, List<String> paths) {
+    for (final p in paths) {
+      final v = _getAtPath(m, p);
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    }
+    return '';
+  }
+
+  num? _firstNum(Map<String, dynamic> m, List<String> paths) {
+    for (final p in paths) {
+      final v = _getAtPath(m, p);
+      final n = _asNum(v);
+      if (n != null) return n;
+    }
+    return null;
+  }
+
+  int? _firstInt(Map<String, dynamic> m, List<String> paths) {
+    for (final p in paths) {
+      final v = _getAtPath(m, p);
+      final n = _asInt(v);
+      if (n != null) return n;
+    }
+    return null;
+  }
+
+  num? _asNum(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v;
+    if (v is String) return num.tryParse(v.replaceAll(',', '.'));
+    return null;
+  }
+
+  int? _asInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
+  }
+
   Future<String> _runnerName(String runnerId) async {
+    if (runnerId.isEmpty) return '';
     if (_runnerNameCache.containsKey(runnerId)) return _runnerNameCache[runnerId]!;
     try {
       final d = await FirebaseFirestore.instance.collection('Laufer').doc(runnerId).get();
-      final m = d.data() ?? {};
-      final a = (m['displayName'] ?? '').toString().trim();
-      if (a.isNotEmpty) {
-        _runnerNameCache[runnerId] = a;
-        return a;
+      final m = (d.data() ?? {}) as Map<String, dynamic>;
+      final display = _firstString(m, ['displayName']);
+      if (display.isNotEmpty) {
+        _runnerNameCache[runnerId] = display;
+        return display;
       }
-      final fn = (m['firstName'] ?? m['vorname'] ?? '').toString().trim();
-      final ln = (m['lastName'] ?? m['nachname'] ?? m['name'] ?? '').toString().trim();
-      final combo = [fn, ln].where((x) => x.isNotEmpty).join(' ');
-      final nick = (m['nickname'] ?? m['spitzname'] ?? '').toString().trim();
+      final fn = _firstString(m, ['firstName', 'vorname']);
+      final ln = _firstString(m, ['lastName', 'nachname', 'name']);
+      final nick = _firstString(m, ['nickname', 'spitzname']);
+      final combo = [fn, ln].where((e) => e.isNotEmpty).join(' ').trim();
       final best = combo.isNotEmpty ? combo : nick;
       _runnerNameCache[runnerId] = best;
       return best;
@@ -63,74 +122,135 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     }
   }
 
-  // === Datenmodell ===
-  Future<List<_SponsorGroup>> _loadGroups() async {
-    final qs = await FirebaseFirestore.instance
-        .collection('Spenden')
-        .where('sponsorEmail', isGreaterThan: '') // nur solche mit irgendeiner Email
-        .get();
+  Future<int> _lapsForRunner(String runnerId) async {
+    if (runnerId.isEmpty) return 0;
 
-    // Gruppieren nach Sponsor-Email
+    final cached = _runnerLapsCache[runnerId];
+    if (cached != null) return cached;
+
+    // 1) Versuch: aus Läufer-Dokument lesen
+    try {
+      final d = await FirebaseFirestore.instance.collection('Laufer').doc(runnerId).get();
+      final m = (d.data() ?? {}) as Map<String, dynamic>;
+      final fromDoc = _firstInt(m, ['currentLaps', 'runden', 'laps']);
+      if (fromDoc != null) {
+        _runnerLapsCache[runnerId] = fromDoc;
+        return fromDoc;
+      }
+    } catch (_) {
+      // ignorieren
+    }
+
+    // 2) Fallback: live zählen in Runden (Aggregate-Query; Fallback normales Query)
+    try {
+      final q = FirebaseFirestore.instance
+          .collection('Runden')
+          .where('runnerId', isEqualTo: runnerId);
+      try {
+        final agg = await q.count().get();
+        // agg.count kann int? sein → robust in int wandeln
+        final int c = (agg.count is int)
+            ? (agg.count as int)
+            : int.tryParse('${agg.count}') ?? 0;
+        _runnerLapsCache[runnerId] = c;
+        return c;
+      } catch (_) {
+        final snap = await q.get();
+        final c = snap.size;
+        _runnerLapsCache[runnerId] = c;
+        return c;
+      }
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ---------- Datenaufbereitung: Spenden gruppieren ----------
+  Future<List<_SponsorGroup>> _loadGroups() async {
+    final qs = await FirebaseFirestore.instance.collection('Spenden').get();
+
     final Map<String, _SponsorGroup> groups = {};
+
     for (final doc in qs.docs) {
-      final m = doc.data();
-      final email = (m['sponsorEmail'] ?? '').toString().trim();
+      final m = (doc.data()) as Map<String, dynamic>;
+
+      // Sponsor-E-Mail (viele Aliasse unterstützt)
+      final email = _firstString(m, [
+        'sponsorEmail',
+        'sponsor.email',
+        'email',
+        'sponsor_email',
+        'sponsorEmailAddress',
+      ]);
       if (email.isEmpty) continue;
 
-      final sponsorName = (m['sponsorName'] ?? m['name'] ?? '').toString().trim();
+      // Sponsor-Name (optional)
+      final sponsorName = _firstString(m, [
+        'sponsorName',
+        'sponsor.name',
+        'name',
+        'sponsorNameDisplay',
+      ]);
+
+      final runnerId = _firstString(m, [
+        'runnerId',
+        'runnerID',
+        'laeuferId',
+        'läuferId',
+        'runner.id'
+      ]);
 
       groups.putIfAbsent(email, () => _SponsorGroup(email: email, sponsorName: sponsorName));
 
-      // Betrag ermitteln
-      final num? currentTotal = _asNum(m['currentTotal']); // bevorzugt Aggregation
-      num itemTotal = currentTotal ?? 0;
+      // Beträge:
+      final num fixed = _firstNum(m, ['fixedAmount', 'betragFix', 'fixed']) ?? 0;
+      final num perLap = _firstNum(m, ['perLapAmount', 'betragProRunde', 'perLap']) ?? 0;
 
-      // Fallbacks, falls currentTotal fehlt:
-      if (itemTotal == 0) {
-        final num? fixed = _asNum(m['fixedAmount']) ?? _asNum(m['betragFix']);
-        final num? perLap = _asNum(m['perLapAmount']) ?? _asNum(m['betragProRunde']);
-        final int? laps = _asInt(m['currentLaps']) ?? _asInt(m['runden']);
+      // Falls Aggregation vorhanden ist, nutzen wir sie direkt
+      final num? aggregated =
+      _firstNum(m, ['currentTotal', 'aggregates.total', 'calc.total']);
 
-        if (fixed != null && fixed > 0) {
-          itemTotal = fixed;
-        } else if (perLap != null && perLap > 0 && laps != null && laps >= 0) {
-          itemTotal = perLap * laps;
+      num totalForThisDonation;
+      if (aggregated != null && aggregated > 0) {
+        totalForThisDonation = aggregated;
+      } else {
+        int laps = 0;
+        if (perLap > 0) {
+          laps = await _lapsForRunner(runnerId);
         }
+        totalForThisDonation = fixed + perLap * laps;
       }
-
-      final runnerId = (m['runnerId'] ?? '').toString();
 
       groups[email]!.items.add(_SponsorItem(
         donationId: doc.id,
         runnerId: runnerId,
-        currentTotal: itemTotal,
-        perLap: _asNum(m['perLapAmount']) ?? _asNum(m['betragProRunde']),
-        fixed: _asNum(m['fixedAmount']) ?? _asNum(m['betragFix']),
-        laps: _asInt(m['currentLaps']) ?? _asInt(m['runden']),
+        currentTotal: totalForThisDonation,
+        perLap: perLap == 0 ? null : perLap,
+        fixed: fixed == 0 ? null : fixed,
       ));
     }
 
-    // Läufernamen anreichern + Gesamttotal
+    // Läufernamen & Summen
     for (final g in groups.values) {
       for (final it in g.items) {
-        it.runnerName = it.runnerId.isEmpty ? '' : await _runnerName(it.runnerId);
+        it.runnerName = await _runnerName(it.runnerId);
       }
       g.recalc();
     }
 
-    // Filter anwenden
+    // Filter
     final filtered = groups.values.where((g) {
       if (_onlyWithEmail && g.email.isEmpty) return false;
       if (_onlyWithPositiveTotal && g.total <= 0) return false;
       return true;
     }).toList();
 
-    // sortieren nach Sponsor
+    // sortieren
     filtered.sort((a, b) => a.email.toLowerCase().compareTo(b.email.toLowerCase()));
     return filtered;
   }
 
-  // === Versand ===
+  // ---------- Versand ----------
   Future<void> _sendOne(_SponsorGroup g) async {
     if (g.email.isEmpty) {
       _flash('Kein Empfänger vorhanden.');
@@ -140,17 +260,10 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
       _flash('Total = 0 – nichts zu versenden.');
       return;
     }
-
     final html = _buildInvoiceHtml(g);
     final subject = '${BillingConfig.paymentRefPrefix} – Rechnung ${_currency.format(g.total)}';
-
     try {
-      await EmailService.queueEmail(
-        to: g.email,
-        subject: subject,
-        html: html,
-        // bcc kommt automatisch über EmailService/BillingConfig (falls gesetzt)
-      );
+      await EmailService.queueEmail(to: g.email, subject: subject, html: html);
       _flash(BillingConfig.testMode
           ? 'Test-E-Mail an ${BillingConfig.testRecipient} in Warteschlange.'
           : 'E-Mail an ${g.email} in Warteschlange.');
@@ -162,7 +275,6 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
   Future<void> _sendAll(List<_SponsorGroup> groups) async {
     setState(() => _sendingAll = true);
     int ok = 0, skipped = 0, fail = 0;
-
     for (final g in groups) {
       if (g.email.isEmpty || g.total <= 0) {
         skipped++;
@@ -170,28 +282,27 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
       }
       try {
         final html = _buildInvoiceHtml(g);
-        final subject = '${BillingConfig.paymentRefPrefix} – Rechnung ${_currency.format(g.total)}';
+        final subject =
+            '${BillingConfig.paymentRefPrefix} – Rechnung ${_currency.format(g.total)}';
         await EmailService.queueEmail(to: g.email, subject: subject, html: html);
         ok++;
       } catch (_) {
         fail++;
       }
     }
-
     setState(() => _sendingAll = false);
-    _flash('Senden abgeschlossen: $ok ok, $skipped übersprungen, $fail Fehler'
-        '${BillingConfig.testMode ? ' (TESTMODUS aktiv)' : ''}.');
+    _flash('Senden: $ok ok, $skipped übersprungen, $fail Fehler'
+        '${BillingConfig.testMode ? ' (TESTMODUS)' : ''}.');
   }
 
-  // === HTML-Template ===
+  // ---------- HTML ----------
   String _buildInvoiceHtml(_SponsorGroup g) {
     final rows = StringBuffer();
     for (final it in g.items) {
-      final detail = _lineDetail(it);
       rows.writeln('''
         <tr>
-          <td style="padding:6px 8px;border-bottom:1px solid #eee;">${_escape(it.runnerName)}</td>
-          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#555;">${_escape(detail)}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;">${_esc(it.runnerName)}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#555;">${_esc(_lineDetail(it))}</td>
           <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">${_currency.format(it.currentTotal)}</td>
         </tr>
       ''');
@@ -204,14 +315,14 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
       </tr>
     ''';
 
-    final org = _escape(BillingConfig.orgName);
-    final iban = _escape(BillingConfig.iban);
-    final ref = _escape('${BillingConfig.paymentRefPrefix} – ${DateFormat('yyyy').format(DateTime.now())}');
+    final org = _esc(BillingConfig.orgName);
+    final iban = _esc(BillingConfig.iban);
+    final ref = _esc(
+        '${BillingConfig.paymentRefPrefix} – ${DateFormat('yyyy').format(DateTime.now())}');
     final infoContact = (BillingConfig.contactEmail.isNotEmpty)
-        ? '<p style="color:#666;">Fragen? Kontakt: ${_escape(BillingConfig.contactEmail)}</p>'
+        ? '<p style="color:#666;">Fragen? Kontakt: ${_esc(BillingConfig.contactEmail)}</p>'
         : '';
 
-    // Sehr schlichtes, kompatibles HTML (Mail-Clients)
     return '''
 <!doctype html>
 <html>
@@ -251,32 +362,24 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
   }
 
   String _lineDetail(_SponsorItem it) {
-    // Human readable Positions-Text
-    if ((it.fixed ?? 0) > 0) {
-      return 'Fixbetrag';
-    }
-    if ((it.perLap ?? 0) > 0) {
-      final l = it.laps;
-      if (l != null) {
-        return 'Pro Runde × $l';
-      }
-      return 'Pro Runde';
-    }
-    return '';
+    final parts = <String>[];
+    if ((it.fixed ?? 0) > 0) parts.add('Fixbetrag');
+    if ((it.perLap ?? 0) > 0) parts.add('Pro Runde');
+    return parts.isEmpty ? '' : parts.join(' + ');
   }
 
-  String _escape(String s) =>
+  String _esc(String s) =>
       s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-  // === UI ===
+  // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
     final bannerTest = BillingConfig.testMode
         ? Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.12),
-        border: Border.all(color: Colors.orange.withOpacity(0.6)),
+        color: Colors.orange.withValues(alpha: 0.12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: const Text('[TESTMODUS] Mails werden an testRecipient geleitet.',
@@ -284,35 +387,18 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     )
         : const SizedBox.shrink();
 
-    final controls = Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        FilterChip(
-          label: const Text('Nur mit E-Mail'),
-          selected: _onlyWithEmail,
-          onSelected: (v) => setState(() => _onlyWithEmail = v),
-        ),
-        FilterChip(
-          label: const Text('Nur Total > 0'),
-          selected: _onlyWithPositiveTotal,
-          onSelected: (v) => setState(() => _onlyWithPositiveTotal = v),
-        ),
-        const SizedBox(width: 12),
-        ElevatedButton.icon(
-          onPressed: _sendingAll ? null : () async {
-            final groups = await _loadGroups();
-            await _sendAll(groups);
-          },
-          icon: const Icon(Icons.send),
-          label: Text(_sendingAll ? 'Senden…' : 'Alle senden (gefiltert)'),
-        ),
-      ],
-    );
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Sponsor-Abrechnung & E-Mail')),
+      appBar: AppBar(
+        title: const Text('Sponsor-Abrechnung & E-Mail'),
+        actions: [
+          IconButton(
+            tooltip: _debug ? 'Debug aus' : 'Debug an',
+            onPressed: () => setState(() => _debug = !_debug),
+            icon: Icon(_debug ? Icons.bug_report : Icons.bug_report_outlined),
+          ),
+        ],
+      ),
+      backgroundColor: Colors.grey.shade100,
       body: FutureBuilder<List<_SponsorGroup>>(
         future: _loadGroups(),
         builder: (context, snap) {
@@ -331,22 +417,60 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
                 children: [
                   bannerTest,
                   if (bannerTest is! SizedBox) const SizedBox(height: 12),
-                  controls,
+
+                  // Filter + Aktionen
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _BoolChip(
+                        label: 'Nur mit E-Mail',
+                        value: _onlyWithEmail,
+                        onChanged: (v) => setState(() => _onlyWithEmail = v),
+                      ),
+                      _BoolChip(
+                        label: 'Nur Total > 0',
+                        value: _onlyWithPositiveTotal,
+                        onChanged: (v) => setState(() => _onlyWithPositiveTotal = v),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: _sendingAll
+                            ? null
+                            : () async {
+                          final g = await _loadGroups();
+                          await _sendAll(g);
+                        },
+                        icon: const Icon(Icons.send),
+                        label: Text(_sendingAll ? 'Senden…' : 'Alle senden (gefiltert)'),
+                      ),
+                    ],
+                  ),
+
                   if (_status != null) ...[
                     const SizedBox(height: 10),
                     Text(_status!, style: const TextStyle(color: Colors.black54)),
                   ],
                   const SizedBox(height: 12),
+
                   if (groups.isEmpty)
                     const Text('Keine Daten für die aktuellen Filter.'),
                   for (final g in groups) _groupCard(g),
+
+                  if (_debug) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Debug: Diese Seite akzeptiert unterschiedliche Feldnamen in "Spenden".',
+                      style: TextStyle(color: Colors.black54),
+                    ),
+                  ],
                 ],
               ),
             ),
           );
         },
       ),
-      backgroundColor: Colors.grey.shade100,
     );
   }
 
@@ -354,7 +478,10 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade300)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -366,8 +493,10 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(g.sponsorName.isNotEmpty ? g.sponsorName : g.email,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                      Text(
+                        g.sponsorName.isNotEmpty ? g.sponsorName : g.email,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
                       if (g.sponsorName.isNotEmpty)
                         Text(g.email, style: const TextStyle(color: Colors.black54)),
                     ],
@@ -379,8 +508,82 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
             ),
             const SizedBox(height: 8),
             const Divider(height: 1),
+
             // Tabelle
-            _itemsTable(g),
+            Table(
+              columnWidths: const {
+                0: FlexColumnWidth(2),
+                1: FlexColumnWidth(2),
+                2: IntrinsicColumnWidth(),
+              },
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              children: [
+                const TableRow(
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text('Läufer', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text('Details', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text('Betrag', style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
+                for (final it in g.items)
+                  TableRow(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(it.runnerName),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(_lineDetail(it),
+                            style: const TextStyle(color: Colors.black54)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(_currency.format(it.currentTotal)),
+                        ),
+                      ),
+                    ],
+                  ),
+                TableRow(
+                  children: [
+                    const SizedBox(),
+                    const Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text('Total',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          _currency.format(g.total),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
@@ -395,109 +598,33 @@ class _SponsorInvoicesPageState extends State<SponsorInvoicesPage> {
       ),
     );
   }
+}
 
-  Widget _itemsTable(_SponsorGroup g) {
-    return Table(
-      columnWidths: const {
-        0: FlexColumnWidth(2),
-        1: FlexColumnWidth(2),
-        2: IntrinsicColumnWidth(),
-      },
-      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      children: [
-        const TableRow(
-          decoration: BoxDecoration(),
-          children: [
-            Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text('Läufer', style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text('Details', style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text('Betrag', style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
-        for (final it in g.items)
-          TableRow(
-            decoration: const BoxDecoration(),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(it.runnerName),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(_lineDetail(it), style: const TextStyle(color: Colors.black54)),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(_currency.format(it.currentTotal)),
-                ),
-              ),
-            ],
-          ),
-        TableRow(
-          children: [
-            const SizedBox(),
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text('Total', style: TextStyle(fontWeight: FontWeight.w700)),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  _currency.format(g.total),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
+// ---------- kleine UI-Helfer ----------
+class _BoolChip extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _BoolChip(
+      {required this.label, required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return FilterChip(
+      label: Text(label),
+      selected: value,
+      onSelected: (v) => onChanged(v),
     );
   }
 }
 
-// ===== Helpers / Modelle =====
-
-num? _asNum(dynamic v) {
-  if (v == null) return null;
-  if (v is num) return v;
-  if (v is String) return num.tryParse(v.replaceAll(',', '.'));
-  return null;
-}
-
-int? _asInt(dynamic v) {
-  if (v == null) return null;
-  if (v is int) return v;
-  if (v is num) return v.toInt();
-  if (v is String) return int.tryParse(v);
-  return null;
-}
-
+// ---------- Modelle ----------
 class _SponsorItem {
   final String donationId;
   final String runnerId;
   final num currentTotal;
   final num? perLap;
   final num? fixed;
-  final int? laps;
-
   String runnerName = '';
 
   _SponsorItem({
@@ -506,7 +633,6 @@ class _SponsorItem {
     required this.currentTotal,
     this.perLap,
     this.fixed,
-    this.laps,
   });
 }
 

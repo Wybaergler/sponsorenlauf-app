@@ -13,7 +13,7 @@ class BillingConfig {
 
   // Testmodus
   static const testMode = true; // true => sendet NICHT an Sponsor, sondern an testRecipient
-  static const testRecipient = 'rene.rothe@outlook.com'; // <- HIER deine Mail einsetzen
+  static const testRecipient = 'adminsponsorenlauf@rothe.ch'; // <- HIER deine Mail einsetzen
 
   // Währung
   static const currency = 'CHF';
