@@ -3,8 +3,16 @@
     {
       "source": "functions",
       "codebase": "default",
-      "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"],
-      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
     }
   ],
   "firestore": {
@@ -14,15 +22,15 @@
     "platforms": {
       "android": {
         "default": {
-          "projectId": "sponsorenlauf-evp-wetzikon",
-          "appId": "1:500504012249:android:a465489bf418541f22e5c8",
+          "projectId": "sponsorenlauf-dev-rene",
+          "appId": "1:774491566478:android:c44e70672ec66a7eb3f4df",
           "fileOutput": "android/app/google-services.json"
         }
       },
       "ios": {
         "default": {
-          "projectId": "sponsorenlauf-evp-wetzikon",
-          "appId": "1:500504012249:ios:7b6746f9be0e2dfa22e5c8",
+          "projectId": "sponsorenlauf-dev-rene",
+          "appId": "1:774491566478:ios:cba324d597d1c0fab3f4df",
           "uploadDebugSymbols": false,
           "fileOutput": "ios/Runner/GoogleService-Info.plist"
         }
@@ -35,8 +43,36 @@
             "ios": "1:500504012249:ios:7b6746f9be0e2dfa22e5c8",
             "web": "1:500504012249:web:6fd79dd2009a975622e5c8"
           }
+        },
+        "lib/firebase_options_dev.dart": {
+          "projectId": "sponsorenlauf-dev-rene",
+          "configurations": {
+            "android": "1:774491566478:android:c44e70672ec66a7eb3f4df",
+            "ios": "1:774491566478:ios:cba324d597d1c0fab3f4df",
+            "web": "1:774491566478:web:dc9b0ae074857ad9b3f4df"
+          }
+        },
+        "lib/firebase_options_prod.dart": {
+          "projectId": "sponsorenlauf-evp-wetzikon",
+          "configurations": {
+            "web": "1:500504012249:web:6fd79dd2009a975622e5c8"
+          }
         }
       }
     }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
   }
 }

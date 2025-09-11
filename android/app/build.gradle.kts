@@ -1,3 +1,5 @@
+// android/app/build.gradle.kts
+
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
@@ -23,21 +25,37 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Basis-ID (nur Fallback; Flavors setzen die finale App-ID)
         applicationId = "com.example.sponsorenlauf_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+        getByName("release") {
+            // Für jetzt Debug-Signatur, damit release-builds starten.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    // >>> Flavors
+    // Wichtig: Kotlin-DSL – saubere, gerade Anführungszeichen verwenden.
+    flavorDimensions += "env"
+    productFlavors {
+        create("dev") {
+            dimension = "env"
+            // exakt die ID, die in Firebase (Android Dev App) registriert ist:
+            applicationId = "ch.evpwetzikon.sponsorenlauf.dev"
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name", "Sponsorenlauf DEV")
+        }
+        create("prod") {
+            dimension = "env"
+            // zukünftige Prod-ID (falls du Android-Prod später nutzen willst)
+            applicationId = "ch.evpwetzikon.sponsorenlauf"
+            resValue("string", "app_name", "Sponsorenlauf")
         }
     }
 }

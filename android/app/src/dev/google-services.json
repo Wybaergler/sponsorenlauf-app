@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "774491566478",
+    "project_id": "sponsorenlauf-dev-rene",
+    "storage_bucket": "sponsorenlauf-dev-rene.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:774491566478:android:c44e70672ec66a7eb3f4df",
+        "android_client_info": {
+          "package_name": "ch.evpwetzikon.sponsorenlauf.dev"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB9lNJUjHbvvJs6vzznxBLCPmZ6GiXY-n0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
